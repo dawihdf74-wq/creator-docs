@@ -1,0 +1,1076 @@
+<title>Paparazzi — Animated Edit</title>
+
+<style>
+  /* ============================================================
+     FLASHBULB — a beat-driven 9:16 edit built for screen capture.
+     Single committed visual world (darkroom / press pit), so this
+     deliberately does not theme light.
+     ============================================================ */
+
+  :root {
+    --void:      #07070A;
+    --void-lift: #101018;
+    --flash:     #FFFFFF;
+    --ink:       #C8102E;
+    --paper:     #EDE7DC;
+    --fringe:    #00E5FF;
+    --smoke:     #4A4550;
+
+    --display: Haettenschweiler, "Arial Narrow Bold", Impact,
+               "Franklin Gothic Bold", "Liberation Sans Narrow",
+               sans-serif-condensed, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --news: Georgia, "Times New Roman", serif;
+
+    /* stage is authored at true vertical-video resolution */
+    --W: 1080px;
+    --H: 1920px;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--void);
+    color: var(--paper);
+    font-family: var(--mono);
+    overflow: hidden;
+  }
+
+  /* ---------- shell ---------- */
+
+  .shell {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    grid-template-rows: 1fr auto;
+  }
+
+  .viewport {
+    position: relative;
+    overflow: hidden;
+    /* faint press-pit haze so the frame doesn't float on flat black */
+    background:
+      radial-gradient(120% 80% at 50% 0%, #14141d 0%, var(--void) 60%);
+  }
+
+  .stage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--W);
+    height: var(--H);
+    transform-origin: center center;
+    background: #000;
+    overflow: hidden;
+    box-shadow: 0 0 120px rgba(0,0,0,.9);
+  }
+
+  /* every layer fills the stage */
+  .stage > * {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* ---------- media ---------- */
+
+  .media { overflow: hidden; }
+
+  .panel {
+    position: absolute;
+    inset: 0;
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transform: scale(1.02);
+    will-change: transform, opacity;
+  }
+  .panel.live { opacity: 1; }
+
+  /* slow tension push during the build */
+  @keyframes push {
+    from { transform: scale(1.02); }
+    to   { transform: scale(1.20); }
+  }
+  .panel.push { animation: push 3.6s linear forwards; }
+
+  /* hard snap-in on a beat cut */
+  @keyframes punch {
+    0%   { transform: scale(1.28); }
+    100% { transform: scale(1.03); }
+  }
+  .panel.punch { animation: punch .30s cubic-bezier(.16,.9,.24,1) forwards; }
+
+  /* alternating direction so consecutive cuts don't feel identical */
+  @keyframes punchOut {
+    0%   { transform: scale(1.00); }
+    100% { transform: scale(1.14); }
+  }
+  .panel.punchOut { animation: punchOut .42s cubic-bezier(.16,.9,.24,1) forwards; }
+
+  /* ---------- chromatic aberration ghosts ---------- */
+
+  .ghost {
+    background-position: center;
+    background-size: cover;
+    mix-blend-mode: screen;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .ghost.r { filter: sepia(1) saturate(7) hue-rotate(-42deg) contrast(1.1); }
+  .ghost.c { filter: sepia(1) saturate(7) hue-rotate(142deg) contrast(1.1); }
+
+  @keyframes splitR {
+    0%   { opacity: .85; transform: translate(-22px, 4px); }
+    100% { opacity: 0;   transform: translate(0,0); }
+  }
+  @keyframes splitC {
+    0%   { opacity: .85; transform: translate(22px, -4px); }
+    100% { opacity: 0;   transform: translate(0,0); }
+  }
+  .ghost.r.on { animation: splitR .22s ease-out forwards; }
+  .ghost.c.on { animation: splitC .22s ease-out forwards; }
+
+  /* ---------- slice glitch ---------- */
+
+  .slices { pointer-events: none; opacity: 0; }
+  .slices.on { opacity: 1; }
+  .slice {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    background-position: center;
+    background-size: cover;
+    will-change: transform;
+  }
+
+  /* ---------- flash + strobe ---------- */
+
+  .flash {
+    background: var(--flash);
+    opacity: 0;
+    pointer-events: none;
+  }
+  @keyframes pop {
+    0%   { opacity: 1; }
+    38%  { opacity: .55; }
+    100% { opacity: 0; }
+  }
+  .flash.on { animation: pop .14s ease-out forwards; }
+  @keyframes popHard {
+    0%   { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .flash.hard { animation: popHard .24s ease-out forwards; }
+
+  /* off-centre bulb bloom — reads as a photographer to the side */
+  .bloom {
+    opacity: 0;
+    pointer-events: none;
+    background: radial-gradient(closest-side, rgba(255,255,255,.95), transparent 70%);
+    width: 900px;
+    height: 900px;
+    inset: auto;
+  }
+  @keyframes bulb {
+    0%   { opacity: .9;  transform: scale(.4); }
+    100% { opacity: 0;   transform: scale(1.6); }
+  }
+  .bloom.on { animation: bulb .38s ease-out forwards; }
+
+  .black {
+    background: #000;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .black.on { opacity: 1; }
+
+  /* ---------- film texture ---------- */
+
+  .grain {
+    pointer-events: none;
+    opacity: .13;
+    mix-blend-mode: overlay;
+  }
+
+  .scanlines {
+    pointer-events: none;
+    opacity: .16;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,.6) 0px,
+      rgba(0,0,0,.6) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  }
+
+  .vignette {
+    pointer-events: none;
+    background: radial-gradient(128% 88% at 50% 46%, transparent 52%, rgba(0,0,0,.72) 100%);
+  }
+
+  /* ---------- letterbox ---------- */
+
+  .bar {
+    background: #000;
+    height: 0;
+    inset: auto 0 auto 0;
+    transition: height .5s cubic-bezier(.2,.8,.2,1);
+    pointer-events: none;
+  }
+  .bar.top    { top: 0; }
+  .bar.bottom { bottom: 0; }
+  .stage.boxed .bar { height: 190px; }
+
+  /* ---------- type ---------- */
+
+  .type {
+    display: grid;
+    place-items: center;
+    padding: 0 70px;
+    pointer-events: none;
+  }
+
+  .slam {
+    font-family: var(--display);
+    text-transform: uppercase;
+    font-size: 150px;
+    line-height: .82;
+    letter-spacing: -.025em;
+    text-align: center;
+    text-wrap: balance;
+    overflow-wrap: break-word;
+    color: var(--flash);
+    opacity: 0;
+    will-change: transform, opacity;
+  }
+  .slam em {
+    font-style: normal;
+    color: var(--ink);
+  }
+
+  @keyframes slamIn {
+    0%   { opacity: 0; transform: scale(1.5); filter: blur(16px);
+           text-shadow: -18px 0 var(--ink), 18px 0 var(--fringe); }
+    22%  { opacity: 1; transform: scale(.99); filter: blur(0);
+           text-shadow: -7px 0 var(--ink), 7px 0 var(--fringe); }
+    32%  { transform: scale(1.02); text-shadow: 0 0 var(--ink), 0 0 var(--fringe); }
+    82%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+  .slam.on { animation: slamIn 1.15s cubic-bezier(.16,.9,.24,1) forwards; }
+
+  /* the credit strip — camera metadata, not decoration */
+  .exif {
+    position: absolute;
+    /* cancel the blanket inset:0 applied to every stage layer */
+    top: auto;
+    right: auto;
+    left: 64px;
+    bottom: 232px;
+    font-family: var(--mono);
+    font-size: 27px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: rgba(237,231,220,.72);
+    opacity: 0;
+    transition: opacity .35s linear;
+    font-variant-numeric: tabular-nums;
+  }
+  .exif.on { opacity: 1; }
+  .exif b {
+    color: var(--ink);
+    font-weight: 400;
+  }
+
+  .rec {
+    position: absolute;
+    top: auto;
+    left: auto;
+    right: 64px;
+    bottom: 232px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: var(--mono);
+    font-size: 27px;
+    letter-spacing: .16em;
+    color: rgba(237,231,220,.72);
+    opacity: 0;
+    transition: opacity .35s linear;
+    font-variant-numeric: tabular-nums;
+  }
+  .rec.on { opacity: 1; }
+  .rec i {
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    background: var(--ink);
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* newsprint slam — the one moment that leaves the black world */
+  .tabloid {
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .tabloid .card {
+    background: var(--paper);
+    color: #12100E;
+    width: 800px;
+    padding: 54px 58px 46px;
+    transform: rotate(-3.5deg);
+    box-shadow: 0 40px 90px rgba(0,0,0,.7);
+  }
+  .tabloid .kicker {
+    font-family: var(--mono);
+    font-size: 24px;
+    letter-spacing: .34em;
+    text-transform: uppercase;
+    color: var(--ink);
+    border-bottom: 3px solid #12100E;
+    padding-bottom: 14px;
+    margin-bottom: 22px;
+  }
+  .tabloid h2 {
+    font-family: var(--display);
+    text-transform: uppercase;
+    font-size: 128px;
+    line-height: .84;
+    letter-spacing: -.02em;
+    text-wrap: balance;
+  }
+  .tabloid .sub {
+    font-family: var(--news);
+    font-style: italic;
+    font-size: 34px;
+    line-height: 1.28;
+    margin-top: 22px;
+    color: #3A352F;
+  }
+  @keyframes slap {
+    0%   { opacity: 0; transform: scale(1.9) rotate(6deg); }
+    16%  { opacity: 1; transform: scale(.97) rotate(-1deg); }
+    24%  { transform: scale(1.01) rotate(0deg); }
+    86%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .tabloid.on { animation: slap 1.5s cubic-bezier(.16,.9,.24,1) forwards; }
+
+  /* ---------- aperture close ---------- */
+
+  .iris {
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    /* the blades carry a huge black spread — keep them off the frame
+       entirely until the outro actually calls for them */
+    visibility: hidden;
+  }
+  .iris.on { visibility: visible; }
+  .iris span {
+    width: 2600px;
+    height: 2600px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 9999px var(--void);
+    display: block;
+  }
+  @keyframes shut {
+    0%   { width: 2600px; height: 2600px; }
+    100% { width: 0; height: 0; }
+  }
+  .iris.on span { animation: shut .85s cubic-bezier(.7,0,.3,1) forwards; }
+
+  /* ---------- shake ---------- */
+
+  @keyframes shake {
+    0%,100% { transform: translate(0,0); }
+    20% { transform: translate(-13px, 7px); }
+    40% { transform: translate(11px, -9px); }
+    60% { transform: translate(-8px, -5px); }
+    80% { transform: translate(6px, 8px); }
+  }
+  .shakeWrap { position: absolute; inset: 0; }
+  .shakeWrap.on { animation: shake .26s linear; }
+
+  /* ---------- countdown ---------- */
+
+  .count {
+    display: grid;
+    place-items: center;
+    background: var(--void);
+    font-family: var(--display);
+    font-size: 460px;
+    color: var(--paper);
+    pointer-events: none;
+    opacity: 0;
+    z-index: 60;
+  }
+  .count.on { opacity: 1; }
+  .count small {
+    position: absolute;
+    bottom: 300px;
+    font-family: var(--mono);
+    font-size: 30px;
+    letter-spacing: .3em;
+    color: var(--smoke);
+  }
+
+  /* ---------- controls ---------- */
+
+  .deck {
+    border-top: 1px solid #1c1c26;
+    background: #0a0a10;
+    padding: 16px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 14px;
+  }
+
+  .deck .title {
+    font-family: var(--display);
+    text-transform: uppercase;
+    font-size: 30px;
+    letter-spacing: .01em;
+    color: var(--paper);
+    margin-right: 6px;
+  }
+  .deck .title i {
+    font-style: normal;
+    color: var(--ink);
+  }
+
+  button, label.file {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--paper);
+    background: #16161f;
+    border: 1px solid #262633;
+    padding: 10px 15px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s;
+  }
+  button:hover, label.file:hover {
+    background: #1f1f2b;
+    border-color: var(--smoke);
+  }
+  button:focus-visible, label.file:focus-within {
+    outline: 2px solid var(--fringe);
+    outline-offset: 2px;
+  }
+  button.hot {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: #fff;
+  }
+  button.hot:hover { background: #e21437; border-color: #e21437; }
+  button[aria-pressed="true"] {
+    border-color: var(--paper);
+    color: var(--flash);
+  }
+
+  label.file input { display: none; }
+
+  .readout {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-size: 12px;
+    letter-spacing: .14em;
+    color: var(--smoke);
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+  }
+  .readout b {
+    color: var(--paper);
+    font-weight: 400;
+  }
+
+  .bpm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    letter-spacing: .14em;
+    color: var(--smoke);
+    text-transform: uppercase;
+  }
+  .bpm output {
+    color: var(--paper);
+    font-variant-numeric: tabular-nums;
+    min-width: 34px;
+    display: inline-block;
+    text-align: right;
+  }
+
+  .hint {
+    width: 100%;
+    font-size: 11.5px;
+    letter-spacing: .07em;
+    color: var(--smoke);
+    line-height: 1.6;
+  }
+  .hint b { color: #7d7688; font-weight: 400; }
+
+  /* record mode strips everything but the frame */
+  body.recording .deck { display: none; }
+  body.recording .shell { grid-template-rows: 1fr; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rec i { animation: none; }
+  }
+</style>
+
+<div class="shell">
+  <div class="viewport" id="viewport">
+    <div class="stage" id="stage">
+
+      <div class="shakeWrap" id="shakeWrap">
+        <div class="media" id="media"></div>
+        <div class="ghost r" id="ghostR"></div>
+        <div class="ghost c" id="ghostC"></div>
+        <div class="slices" id="slices"></div>
+      </div>
+
+      <div class="vignette"></div>
+      <div class="grain" id="grain"></div>
+      <div class="scanlines"></div>
+
+      <div class="bloom" id="bloom"></div>
+      <div class="flash" id="flash"></div>
+      <div class="black" id="black"></div>
+
+      <div class="bar top"></div>
+      <div class="bar bottom"></div>
+
+      <div class="type"><div class="slam" id="slam"></div></div>
+
+      <div class="tabloid" id="tabloid">
+        <div class="card">
+          <div class="kicker">Exclusive &middot; Page One</div>
+          <h2 id="tabHead">Biggest<br>Fan</h2>
+          <div class="sub" id="tabSub">&ldquo;I&rsquo;ll follow you until you love me.&rdquo;</div>
+        </div>
+      </div>
+
+      <div class="exif" id="exif"></div>
+      <div class="rec" id="recBadge"><i></i><span id="tc">00:00:00</span></div>
+
+      <div class="iris" id="iris"><span></span></div>
+      <div class="count" id="count"><span id="countN">3</span><small>Start your screen recording</small></div>
+
+    </div>
+  </div>
+
+  <div class="deck">
+    <div class="title">Papa<i>razzi</i></div>
+
+    <button id="play" class="hot">Play</button>
+    <label class="file" tabindex="0">Load photos
+      <input type="file" id="files" accept="image/*" multiple>
+    </label>
+    <button id="loop" aria-pressed="false">Loop</button>
+    <button id="record">Record mode</button>
+
+    <div class="bpm">
+      <span>BPM</span>
+      <button id="bpmDown" aria-label="Decrease BPM">&minus;</button>
+      <output id="bpmOut">145</output>
+      <button id="bpmUp" aria-label="Increase BPM">+</button>
+    </div>
+
+    <div class="readout">
+      <span>Beat <b id="beatOut">0.0</b></span>
+      <span>Drop <b>8.0</b></span>
+      <span><b id="slotOut">0</b>/8 photos</span>
+    </div>
+
+    <p class="hint">
+      Load 8 photos in the order you want them cut. The drop lands on <b>beat 8</b> &mdash; line that up with
+      &ldquo;I&rsquo;m your biggest fan&rdquo; in your audio. Nudge BPM until the cuts sit on the beat, hit
+      <b>Record mode</b> for a clean frame and a 3-2-1 countdown, then screen-record and lay the song over it in CapCut.
+    </p>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* ============================================================
+     TIMELINE
+     Authored in beats, not seconds, so retiming is one number.
+     ============================================================ */
+
+  let BPM = 145;
+  const beatLen = () => 60 / BPM;
+
+  const SLOT_COUNT = 8;
+
+  // b: beat  |  a: action  |  v: value
+  const TL = [
+    // ---- BUILD: one held frame, tightening ----
+    { b: 0.0,  a: "boxed",  v: true },
+    { b: 0.0,  a: "cut",    v: 0, mode: "push" },
+    { b: 0.0,  a: "exif",   v: 'ISO 6400 &nbsp; f/1.8 &nbsp; 1/200 &nbsp; <b>&bull; REC</b>' },
+    { b: 2.0,  a: "bulb" },
+    { b: 4.0,  a: "bulb" },
+    { b: 5.0,  a: "slam",   v: "Papa<em>razzi</em>", size: 120 },
+    { b: 6.0,  a: "bulb" },
+    { b: 7.5,  a: "blackout", v: true },
+
+    // ---- THE DROP ----
+    { b: 8.0,  a: "blackout", v: false },
+    { b: 8.0,  a: "boxed",  v: false },
+    { b: 8.0,  a: "flashHard" },
+    { b: 8.0,  a: "cut",    v: 1, mode: "punch", shake: true, split: true },
+    { b: 8.0,  a: "slam",   v: "I&rsquo;m your <em>biggest fan</em>" },
+
+    { b: 9.0,  a: "flash" },
+    { b: 9.0,  a: "cut",    v: 2, mode: "punchOut", split: true },
+
+    { b: 10.0, a: "flash" },
+    { b: 10.0, a: "cut",    v: 3, mode: "punch", shake: true, glitch: true },
+    { b: 10.0, a: "slam",   v: "I&rsquo;ll <em>follow</em> you" },
+
+    { b: 11.0, a: "flash" },
+    { b: 11.0, a: "cut",    v: 4, mode: "punchOut", split: true },
+
+    { b: 12.0, a: "flashHard" },
+    { b: 12.0, a: "cut",    v: 5, mode: "punch", shake: true },
+    { b: 12.0, a: "slam",   v: "until you <em>love me</em>" },
+
+    // ---- DOUBLE TIME: half-beat strobe run ----
+    { b: 13.0,  a: "cut", v: 6, mode: "punch",    strobe: true, glitch: true },
+    { b: 13.5,  a: "cut", v: 7, mode: "punchOut", strobe: true },
+    { b: 14.0,  a: "cut", v: 0, mode: "punch",    strobe: true, glitch: true },
+    { b: 14.5,  a: "cut", v: 1, mode: "punchOut", strobe: true },
+    { b: 15.0,  a: "cut", v: 2, mode: "punch",    strobe: true, glitch: true },
+    { b: 15.5,  a: "cut", v: 3, mode: "punchOut", strobe: true },
+
+    // ---- SECOND HIT ----
+    { b: 16.0, a: "flashHard" },
+    { b: 16.0, a: "cut",  v: 4, mode: "punch", shake: true, split: true },
+    { b: 16.0, a: "slam", v: "Papa&mdash;<em>paparazzi</em>", size: 150 },
+
+    { b: 17.0, a: "flash" },
+    { b: 17.0, a: "cut",  v: 5, mode: "punchOut" },
+
+    { b: 18.0, a: "flash" },
+    { b: 18.0, a: "cut",  v: 6, mode: "punch", glitch: true, shake: true },
+
+    { b: 19.0, a: "flash" },
+    { b: 19.0, a: "cut",  v: 7, mode: "punchOut", split: true },
+
+    // ---- OUTRO ----
+    { b: 20.0, a: "flashHard" },
+    { b: 20.0, a: "cut",     v: 0, mode: "push" },
+    { b: 20.0, a: "tabloid" },
+    { b: 22.0, a: "boxed",   v: true },
+    { b: 23.0, a: "iris" },
+    { b: 24.0, a: "end" }
+  ];
+
+  const END_BEAT = 24.5;
+
+  /* ============================================================
+     ELEMENTS
+     ============================================================ */
+
+  const $ = (id) => document.getElementById(id);
+  const stage    = $("stage");
+  const viewport = $("viewport");
+  const media    = $("media");
+  const ghostR   = $("ghostR");
+  const ghostC   = $("ghostC");
+  const slices   = $("slices");
+  const flash    = $("flash");
+  const bloom    = $("bloom");
+  const black    = $("black");
+  const grain    = $("grain");
+  const slam     = $("slam");
+  const tabloid  = $("tabloid");
+  const exif     = $("exif");
+  const recBadge = $("recBadge");
+  const iris     = $("iris");
+  const shakeWrap= $("shakeWrap");
+  const count    = $("count");
+  const countN   = $("countN");
+  const tc       = $("tc");
+
+  const playBtn  = $("play");
+  const loopBtn  = $("loop");
+  const recBtn   = $("record");
+  const filesInp = $("files");
+  const bpmOut   = $("bpmOut");
+  const beatOut  = $("beatOut");
+  const slotOut  = $("slotOut");
+
+  /* ============================================================
+     PLACEHOLDERS
+     Drawn rather than flat boxes, so the composition reads
+     correctly before real photos land.
+     ============================================================ */
+
+  function placeholder(i) {
+    const c = document.createElement("canvas");
+    c.width = 540; c.height = 960;
+    const g = c.getContext("2d");
+
+    const hue = 232 + i * 9;
+    const grd = g.createLinearGradient(0, 0, 540, 960);
+    grd.addColorStop(0, `hsl(${hue} 22% 15%)`);
+    grd.addColorStop(1, `hsl(${hue - 18} 26% 7%)`);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 540, 960);
+
+    // diagonal press-tape hatching
+    g.strokeStyle = "rgba(255,255,255,.045)";
+    g.lineWidth = 26;
+    for (let x = -960; x < 1080; x += 74) {
+      g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 960, 960); g.stroke();
+    }
+
+    // slot number
+    g.fillStyle = "rgba(237,231,220,.16)";
+    g.font = "700 300px Impact, 'Arial Narrow Bold', sans-serif";
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(String(i + 1).padStart(2, "0"), 270, 452);
+
+    g.fillStyle = "rgba(200,16,46,.85)";
+    g.font = "22px ui-monospace, Menlo, monospace";
+    g.fillText("DROP PHOTO HERE", 270, 620);
+
+    // frame corners
+    g.strokeStyle = "rgba(237,231,220,.22)";
+    g.lineWidth = 3;
+    const m = 30, L = 60;
+    [[m,m,1,1],[540-m,m,-1,1],[m,960-m,1,-1],[540-m,960-m,-1,-1]].forEach(([x,y,dx,dy]) => {
+      g.beginPath();
+      g.moveTo(x + dx*L, y); g.lineTo(x, y); g.lineTo(x, y + dy*L);
+      g.stroke();
+    });
+
+    // grain pass
+    const img = g.getImageData(0, 0, 540, 960);
+    for (let p = 0; p < img.data.length; p += 4) {
+      const n = (Math.random() - .5) * 26;
+      img.data[p] += n; img.data[p+1] += n; img.data[p+2] += n;
+    }
+    g.putImageData(img, 0, 0);
+
+    return c.toDataURL();
+  }
+
+  /* ---------- panels ---------- */
+
+  const sources = [];
+  const panels  = [];
+
+  for (let i = 0; i < SLOT_COUNT; i++) {
+    sources[i] = placeholder(i);
+    const d = document.createElement("div");
+    d.className = "panel";
+    d.style.backgroundImage = `url(${sources[i]})`;
+    media.appendChild(d);
+    panels.push(d);
+  }
+
+  const SLICE_COUNT = 5;
+  const sliceEls = [];
+  for (let i = 0; i < SLICE_COUNT; i++) {
+    const s = document.createElement("div");
+    s.className = "slice";
+    slices.appendChild(s);
+    sliceEls.push(s);
+  }
+
+  /* ---------- film grain ---------- */
+
+  (function buildGrain() {
+    const c = document.createElement("canvas");
+    c.width = c.height = 140;
+    const g = c.getContext("2d");
+    const img = g.createImageData(140, 140);
+    for (let p = 0; p < img.data.length; p += 4) {
+      const v = 90 + Math.random() * 165;
+      img.data[p] = img.data[p+1] = img.data[p+2] = v;
+      img.data[p+3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    grain.style.backgroundImage = `url(${c.toDataURL()})`;
+  })();
+
+  /* ============================================================
+     EFFECTS
+     ============================================================ */
+
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function retrigger(el, cls) {
+    el.classList.remove(cls);
+    void el.offsetWidth;      // force reflow so the animation restarts
+    el.classList.add(cls);
+  }
+
+  let current = 0;
+
+  function cut(i, mode) {
+    panels.forEach((p) => {
+      p.classList.remove("live", "push", "punch", "punchOut");
+    });
+    const p = panels[i];
+    p.classList.add("live");
+    if (!reduced) retrigger(p, mode);
+    current = i;
+    const url = `url(${sources[i]})`;
+    ghostR.style.backgroundImage = url;
+    ghostC.style.backgroundImage = url;
+    sliceEls.forEach((s) => { s.style.backgroundImage = url; });
+  }
+
+  function doSplit() {
+    if (reduced) return;
+    retrigger(ghostR, "on");
+    retrigger(ghostC, "on");
+  }
+
+  function doGlitch() {
+    if (reduced) return;
+    slices.classList.add("on");
+    sliceEls.forEach((s) => {
+      const top = Math.random() * 1700;
+      const h   = 40 + Math.random() * 150;
+      s.style.top = top + "px";
+      s.style.height = h + "px";
+      // keep the sampled band aligned to where it sits in frame
+      s.style.backgroundPosition = `center -${top}px`;
+      s.style.backgroundSize = "1080px 1920px";
+      s.style.transform = `translateX(${(Math.random() - .5) * 190}px)`;
+    });
+    clearTimeout(doGlitch.t);
+    doGlitch.t = setTimeout(() => slices.classList.remove("on"), 110);
+  }
+
+  function doFlash(hard) {
+    if (reduced) return;
+    flash.classList.remove("on", "hard");
+    retrigger(flash, hard ? "hard" : "on");
+  }
+
+  function doBulb() {
+    if (reduced) return;
+    bloom.style.left = (Math.random() * 700 - 100) + "px";
+    bloom.style.top  = (Math.random() * 1200 + 100) + "px";
+    retrigger(bloom, "on");
+  }
+
+  function doShake() {
+    if (reduced) return;
+    retrigger(shakeWrap, "on");
+  }
+
+  function doStrobe() {
+    if (reduced) return;
+    black.classList.add("on");
+    setTimeout(() => black.classList.remove("on"), 42);
+    doFlash(false);
+  }
+
+  function doSlam(html, size) {
+    slam.innerHTML = html;
+    slam.style.fontSize = (size || 150) + "px";
+    if (reduced) { slam.style.opacity = "1"; return; }
+    retrigger(slam, "on");
+  }
+
+  function reset() {
+    [flash, bloom, slam, tabloid, iris, shakeWrap].forEach((el) =>
+      el.classList.remove("on", "hard"));
+    slices.classList.remove("on");
+    black.classList.remove("on");
+    stage.classList.remove("boxed");
+    exif.classList.remove("on");
+    recBadge.classList.remove("on");
+    slam.style.opacity = "";
+    panels.forEach((p) => p.classList.remove("live", "push", "punch", "punchOut"));
+  }
+
+  /* ============================================================
+     ENGINE
+     ============================================================ */
+
+  let playing = false;
+  let startedAt = 0;
+  let cursor = 0;
+  let looping = false;
+  let raf = 0;
+
+  function fire(cue) {
+    switch (cue.a) {
+      case "cut":
+        cut(cue.v, cue.mode || "punch");
+        if (cue.split)  doSplit();
+        if (cue.glitch) doGlitch();
+        if (cue.shake)  doShake();
+        if (cue.strobe) doStrobe();
+        break;
+      case "flash":     doFlash(false); break;
+      case "flashHard": doFlash(true);  break;
+      case "bulb":      doBulb();       break;
+      case "slam":      doSlam(cue.v, cue.size); break;
+      case "boxed":
+        stage.classList.toggle("boxed", cue.v);
+        exif.classList.toggle("on", cue.v);
+        recBadge.classList.toggle("on", cue.v);
+        break;
+      case "exif":      exif.innerHTML = cue.v; break;
+      case "blackout":  black.classList.toggle("on", cue.v); break;
+      case "tabloid":   retrigger(tabloid, "on"); break;
+      case "iris":      retrigger(iris, "on"); break;
+      case "end":       finish(); break;
+    }
+  }
+
+  function frame() {
+    if (!playing) return;
+    const t = (performance.now() - startedAt) / 1000;
+    const beat = t / beatLen();
+
+    while (cursor < TL.length && TL[cursor].b <= beat) {
+      fire(TL[cursor]);
+      cursor++;
+    }
+
+    beatOut.textContent = beat.toFixed(1);
+    const secs = Math.max(0, t);
+    tc.textContent =
+      "00:" + String(Math.floor(secs)).padStart(2, "0") + ":" +
+      String(Math.floor((secs % 1) * 100)).padStart(2, "0");
+
+    // drift the grain so the texture never sits still
+    grain.style.backgroundPosition =
+      `${Math.floor(Math.random() * 140)}px ${Math.floor(Math.random() * 140)}px`;
+
+    if (beat >= END_BEAT) { finish(); return; }
+    raf = requestAnimationFrame(frame);
+  }
+
+  function finish() {
+    if (!playing) return;
+    playing = false;
+    cancelAnimationFrame(raf);
+    if (looping) { setTimeout(start, 420); return; }
+    playBtn.textContent = "Replay";
+    if (document.body.classList.contains("recording")) {
+      document.body.classList.remove("recording");
+      recBtn.setAttribute("aria-pressed", "false");
+      recBtn.textContent = "Record mode";
+      fit();
+    }
+  }
+
+  function start() {
+    cancelAnimationFrame(raf);
+    reset();
+    cursor = 0;
+    startedAt = performance.now();
+    playing = true;
+    playBtn.textContent = "Restart";
+    raf = requestAnimationFrame(frame);
+  }
+
+  function countIn(then) {
+    let n = 3;
+    count.classList.add("on");
+    countN.textContent = n;
+    const tick = setInterval(() => {
+      n--;
+      if (n <= 0) {
+        clearInterval(tick);
+        count.classList.remove("on");
+        then();
+      } else {
+        countN.textContent = n;
+      }
+    }, 1000);
+  }
+
+  /* ============================================================
+     FIT + CONTROLS
+     ============================================================ */
+
+  function fit() {
+    const s = Math.min(viewport.clientWidth / 1080, viewport.clientHeight / 1920);
+    stage.style.transform = `translate(-50%,-50%) scale(${s})`;
+  }
+  addEventListener("resize", fit);
+
+  playBtn.addEventListener("click", start);
+
+  loopBtn.addEventListener("click", () => {
+    looping = !looping;
+    loopBtn.setAttribute("aria-pressed", String(looping));
+  });
+
+  recBtn.addEventListener("click", () => {
+    document.body.classList.add("recording");
+    recBtn.setAttribute("aria-pressed", "true");
+    requestAnimationFrame(() => {
+      fit();
+      countIn(start);
+    });
+  });
+
+  filesInp.addEventListener("change", (e) => {
+    const list = [...e.target.files].slice(0, SLOT_COUNT);
+    // read as data URLs rather than blob: — survives stricter embed sandboxes
+    list.forEach((f, i) => {
+      const fr = new FileReader();
+      fr.onload = () => {
+        sources[i] = fr.result;
+        panels[i].style.backgroundImage = `url(${fr.result})`;
+        if (i === current) cut(i, "punch");
+      };
+      fr.readAsDataURL(f);
+    });
+    slotOut.textContent = String(list.length);
+  });
+
+  function setBPM(v) {
+    BPM = Math.max(60, Math.min(220, v));
+    bpmOut.textContent = BPM;
+  }
+  $("bpmUp").addEventListener("click",   () => setBPM(BPM + 1));
+  $("bpmDown").addEventListener("click", () => setBPM(BPM - 1));
+
+  addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    if (e.code === "Space") { e.preventDefault(); start(); }
+    if (e.key === "Escape" && document.body.classList.contains("recording")) {
+      document.body.classList.remove("recording");
+      recBtn.setAttribute("aria-pressed", "false");
+      fit();
+    }
+  });
+
+  /* ---------- boot ---------- */
+
+  fit();
+  cut(0, "push");
+  panels[0].classList.remove("push");
+  stage.classList.add("boxed");
+  exif.innerHTML = 'ISO 6400 &nbsp; f/1.8 &nbsp; 1/200 &nbsp; <b>&bull; REC</b>';
+
+  if (!reduced) setTimeout(start, 500);
+  else playBtn.textContent = "Play";
+})();
+</script>
