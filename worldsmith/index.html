@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Worldsmith — a god sandbox</title>
+    <meta
+      name="description"
+      content="A free browser sandbox: build worlds, raise civilisations, and destroy them."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="loading">Forging the world…</div>
+
+    <header id="topbar"></header>
+
+    <main id="stage">
+      <canvas id="view"></canvas>
+      <div id="feed"></div>
+    </main>
+
+    <aside id="side"></aside>
+
+    <footer id="toolbar"></footer>
+
+    <!--
+      Classic scripts, loaded in dependency order and sharing one `WB` global.
+      ES modules would be blocked by CORS on file:// URLs, which would mean the
+      game could not simply be opened by double-clicking this page.
+    -->
+    <script src="src/core/rng.js"></script>
+    <script src="src/core/noise.js"></script>
+    <script src="src/core/events.js"></script>
+    <script src="src/world/terrain.js"></script>
+    <script src="src/core/grid.js"></script>
+    <script src="src/core/camera.js"></script>
+    <script src="src/core/loop.js"></script>
+
+    <script src="src/world/worldgen.js"></script>
+    <script src="src/world/water.js"></script>
+    <script src="src/world/fire.js"></script>
+    <script src="src/world/lava.js"></script>
+    <script src="src/world/climate.js"></script>
+
+    <script src="src/gfx/atlas.js"></script>
+    <script src="src/gfx/icons.js"></script>
+    <script src="src/gfx/particles.js"></script>
+    <script src="src/gfx/render.js"></script>
+    <script src="src/gfx/minimap.js"></script>
+
+    <script src="src/life/species.js"></script>
+    <script src="src/life/names.js"></script>
+    <script src="src/life/units.js"></script>
+
+    <script src="src/powers/blast.js"></script>
+    <script src="src/powers/effects.js"></script>
+
+    <script src="src/civ/buildings.js"></script>
+    <script src="src/civ/kingdoms.js"></script>
+    <script src="src/civ/villages.js"></script>
+    <script src="src/civ/civai.js"></script>
+
+    <script src="src/powers/registry.js"></script>
+
+    <script src="src/io/audio.js"></script>
+    <script src="src/io/save.js"></script>
+
+    <script src="src/ui/ui.js"></script>
+    <script src="src/main.js"></script>
+    <script src="src/boot.js"></script>
+  </body>
+</html>
