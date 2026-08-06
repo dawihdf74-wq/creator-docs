@@ -11,14 +11,26 @@ play.** It also works on a phone.
 ## Running it
 
 ```
-# simplest: just open the file
-xdg-open worldsmith/index.html      # or double-click it
+# easiest: one self-contained file, nothing else needed
+xdg-open worldsmith/dist/worldsmith.html   # or double-click it
+
+# or run from source (same game, 33 files that must stay together)
+xdg-open worldsmith/index.html
 
 # or serve it, if you prefer
 npx serve worldsmith
 ```
 
-It is a static page, so any static host works — GitHub Pages, Netlify, a USB stick.
+`dist/worldsmith.html` is a single ~330 KB file with the CSS and all scripts inlined — handy for
+emailing, dropping on a USB stick, or hosting anywhere. Regenerate it after changing anything
+under `src/`:
+
+```
+node worldsmith/tools/bundle.mjs
+```
+
+Edit the sources, not `dist/`. It is a static page either way, so any static host works —
+GitHub Pages, Netlify, a shared folder.
 
 ## What's in it
 
@@ -116,6 +128,7 @@ worldsmith/
 npm i -D playwright        # if you don't already have it
 node worldsmith/test/smoke.mjs
 node worldsmith/test/smoke.mjs --screenshots
+node worldsmith/test/smoke.mjs --target dist/worldsmith.html   # same checks, bundled build
 ```
 
 The suite loads the game over `file://` (which is also how it proves the no-server claim),

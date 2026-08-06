@@ -1,10 +1,14 @@
 /* Worldsmith - headless smoke test.
  *
- *   node worldsmith/test/smoke.mjs [--screenshots]
+ *   node worldsmith/test/smoke.mjs [--screenshots] [--target <path>]
  *
  * Loads the game over file:// (which also proves the "no server needed" claim),
  * drives the simulation, fires every registered power, and checks the world
- * stays numerically sane and fast enough to play. */
+ * stays numerically sane and fast enough to play.
+ *
+ * --target runs the identical suite against another entry point, so the
+ * single-file build in dist/ is held to the same standard as the sources
+ * rather than being assumed to work because the sources do. */
 
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -15,7 +19,14 @@ import { execFileSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..');
-const indexUrl = pathToFileURL(path.join(root, 'index.html')).href;
+const targetArg = process.argv.indexOf('--target');
+const targetRel = targetArg >= 0 ? process.argv[targetArg + 1] : 'index.html';
+const targetPath = path.resolve(root, targetRel);
+if (!fs.existsSync(targetPath)) {
+  console.error(`No such entry point: ${targetPath}`);
+  process.exit(1);
+}
+const indexUrl = pathToFileURL(targetPath).href;
 const shotDir = path.join(root, 'test', 'screenshots');
 
 /* Playwright may be local or installed globally; resolve it either way. */
@@ -68,7 +79,7 @@ page.on('console', (m) => {
 });
 page.on('pageerror', (e) => pageErrors.push(String(e)));
 
-section('Boot');
+section(`Boot (${path.relative(root, targetPath)})`);
 await page.goto(indexUrl);
 await page.waitForFunction('window.WORLDSMITH_READY === true', null, { timeout: 30000 });
 check('loads from file:// with no server', true);
