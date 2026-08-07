@@ -90,6 +90,9 @@
     });
     WB.Climate.attach(world);
     world.seasons = this.settings.seasons;
+    /* Open at midday. Tick 0 is midnight, so a freshly forged world would
+     * otherwise greet you in the dark. */
+    world.tick = Math.floor(WB.Climate.DAY_TICKS / 2);
 
     this.units.reset();
     this.buildings.reset();

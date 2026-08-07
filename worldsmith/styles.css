@@ -4,10 +4,10 @@
  * collapse independently on small screens. */
 
 :root {
-  --bg: #10131a;
-  --panel: #191d27;
-  --panel-2: #212736;
-  --line: #2e3547;
+  --bg: #0d1119;
+  --panel: #1a2030;
+  --panel-2: #252e44;
+  --line: #37435f;
   --text: #e6e2d8;
   --muted: #9aa2b4;
   --accent: #ffe14d;
@@ -129,13 +129,15 @@ body {
 }
 
 .btn {
-  background: var(--panel-2);
+  background: linear-gradient(180deg, #2b3550 0%, #212a3e 100%);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 5px;
-  padding: 5px 11px;
+  border-radius: 7px;
+  padding: 5px 12px;
   cursor: pointer;
   font-size: 12px;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 .btn:hover {
@@ -499,16 +501,21 @@ body {
   gap: 6px;
   background: none;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 7px;
   color: var(--muted);
-  padding: 3px 8px 3px 4px;
+  padding: 4px 10px 4px 5px;
   cursor: pointer;
   font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
+.tab:hover {
+  color: var(--text);
+}
+
 .tab.active {
-  background: var(--panel-2);
+  background: linear-gradient(180deg, #2f3a56 0%, #262f46 100%);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -530,33 +537,46 @@ body {
 }
 
 .power {
-  width: 62px;
-  background: var(--panel-2);
+  width: 64px;
+  background: linear-gradient(180deg, #2b3550 0%, #212a3e 100%);
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 9px;
   color: var(--muted);
   cursor: pointer;
-  padding: 4px 2px 3px;
+  padding: 5px 2px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transition:
+    transform 0.06s ease,
+    border-color 0.12s ease;
 }
 
 .power:hover {
-  border-color: var(--muted);
+  border-color: #7d8ba8;
   color: var(--text);
+  transform: translateY(-1px);
+}
+
+.power:active {
+  transform: translateY(1px);
 }
 
 .power.active {
   border-color: var(--accent);
-  background: var(--accent-dim);
+  background: linear-gradient(180deg, #6a5c22 0%, #4a3f14 100%);
   color: var(--accent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 0 1px rgba(255, 225, 77, 0.45),
+    0 0 12px rgba(255, 225, 77, 0.22);
 }
 
 .power-icon {
-  width: 26px;
-  height: 26px;
+  width: 29px;
+  height: 29px;
 }
 
 .power-label {

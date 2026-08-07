@@ -172,7 +172,10 @@
           var d2 = dx * dx + dy * dy;
           if (d2 > r2) continue;
           var i = y * world.w + x;
-          if (world.water[i] > 40) continue; /* open sea is nobody's */
+          /* Territory stops at the waterline. Letting claims run out over
+           * shallow sea drew coloured borders across open water, which read as
+           * a rendering fault rather than as a coastline. */
+          if (world.water[i] > 8) continue;
           /* Terrain-weighted distance, not raw euclidean: claims reach far
            * along easy ground and stall against mountains and open water, so
            * borders hug the landscape instead of drawing perfect circles. */

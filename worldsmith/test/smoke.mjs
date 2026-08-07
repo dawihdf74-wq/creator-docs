@@ -279,6 +279,21 @@ if (wantShots) {
   await page.evaluate(() => WB.debug.game.renderer.setMapMode('normal'));
   await page.waitForTimeout(300);
   await page.screenshot({ path: path.join(shotDir, '5-civilisation.png') });
+
+  /* Close enough to see individual trees, buildings and people - this is the
+   * zoom the art has to hold up at. */
+  await page.evaluate(() => {
+    const g = WB.debug.game;
+    g.camera.setZoom(11);
+    const v = g.villages.aliveList().sort((a, b) => b.population - a.population)[0];
+    if (v) g.camera.centerOn(v.x, v.y);
+    /* Roll the clock to midday so the shot shows the palette, not the night wash. */
+    g.world.tick +=
+      (WB.Climate.DAY_TICKS / 2 - (g.world.tick % WB.Climate.DAY_TICKS) + WB.Climate.DAY_TICKS) %
+      WB.Climate.DAY_TICKS;
+  });
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: path.join(shotDir, '6-closeup.png') });
 }
 
 section('Performance');
@@ -296,6 +311,24 @@ check(
   'sustains >= 30 sim ticks/sec at 384x256',
   perf.tps >= 30,
   `${perf.tps.toFixed(0)} tps with ${perf.units} units (${perf.msPerTick.toFixed(2)} ms/tick)`
+);
+
+/* Render throughput, measured by letting the page actually run for a while.
+ * Reading the counter straight after a synchronous tick burst reports the
+ * burst's stall inside the rolling average, which reads far below real play. */
+const renderPerf = await page.evaluate(async () => {
+  const g = WB.debug.game;
+  g.camera.setZoom(6);
+  g.loop.setSpeed(1);
+  await new Promise((r) => setTimeout(r, 2500));
+  const out = { fps: g.loop.fps, units: g.stats().units };
+  g.loop.setSpeed(0);
+  return out;
+});
+check(
+  'renders >= 30 fps at zoom 6 under load',
+  renderPerf.fps >= 30,
+  `${renderPerf.fps} fps with ${renderPerf.units} units`
 );
 
 section('Persistence');

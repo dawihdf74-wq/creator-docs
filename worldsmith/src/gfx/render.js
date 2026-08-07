@@ -10,11 +10,48 @@
   var T = WB.T;
 
   var VOID_COLOR = '#080a10';
-  var WATER_SHALLOW = [96, 172, 200];
-  var WATER_DEEP = [14, 42, 74];
+
+  /* Water is drawn as a few flat depth bands rather than a smooth gradient.
+   * Hard steps are what make water read as pixel art instead of as a
+   * bathymetric chart, and they give coastlines a definite shape. */
+  var WATER_BANDS = [
+    [126, 206, 219] /* shore   */,
+    [78, 165, 201] /* shallow */,
+    [45, 110, 163] /* mid     */,
+    [26, 68, 118] /* deep    */,
+    [16, 44, 84] /* abyss   */,
+  ];
+  var WATER_CUTS = [7, 22, 55, 120]; /* water-column thresholds between bands */
+
+  /* Discrete tone steps per tile. Continuous noise looks like film grain;
+   * a handful of fixed steps looks like a pixel artist chose them. */
+  var TONE_STEPS = [-1, -0.45, 0.15, 0.7];
+
+  /* Roughly how many scenery sprites to draw per frame regardless of zoom. */
+  var SCENERY_BUDGET = 3200;
 
   /* How white a tile goes at each Climate.frostLevel bucket. */
   var FROST_WASH = [0, 0.14, 0.4, 0.66];
+
+  /* Static wave pattern, so water has surface texture for free.
+   *
+   * 32x32 rather than 16x16, and heavily damped with depth: a strong pattern on
+   * a wide ocean stops reading as waves and starts reading as tiled wallpaper,
+   * because you can see it repeat. Chop is a shallow-water phenomenon anyway. */
+  var WAVE_N = 32;
+  var WAVE = new Int8Array(WAVE_N * WAVE_N);
+  (function () {
+    for (var y = 0; y < WAVE_N; y++) {
+      for (var x = 0; x < WAVE_N; x++) {
+        var v =
+          Math.sin((x * 0.9 + y * 1.7) * 0.31) +
+          Math.sin((x * 1.9 - y * 0.6) * 0.17) +
+          Math.sin((x * 0.4 + y * 0.5) * 0.53) * 0.6;
+        WAVE[y * WAVE_N + x] = v > 1.5 ? 6 : v > 0.9 ? 3 : v < -1.6 ? -4 : 0;
+      }
+    }
+  })();
+  var WAVE_BY_BAND = [1, 0.75, 0.3, 0.12, 0.08];
 
   /* Stable per-tile hash: gives every tile a fixed colour jitter so the map
    * has texture without shimmering when a chunk is rebuilt. */
@@ -122,34 +159,51 @@
     var def = WB.TERRAIN[t];
     var base = def.rgb;
     var hash = tileHash(i);
+    var w = world.w;
 
-    /* per-tile jitter */
-    var j = ((hash & 255) / 255 - 0.5) * def.jitter * 2;
+    /* per-tile tone, quantised to a few steps */
+    var j = TONE_STEPS[hash & 3] * def.jitter;
     r = base[0] + j;
     g = base[1] + j;
     b = base[2] + j;
 
-    /* vegetation density darkens and greens a tile as biomass grows */
+    /* vegetation density darkens and greens a tile as biomass grows, also in
+     * steps so a forest looks dappled rather than smoothly shaded */
     if (def.fuel > 8) {
       var fv = world.fuel[i] / def.fuel;
-      var vf = 0.72 + fv * 0.34;
+      var vf = 0.78 + ((fv * 3.99) | 0) * 0.085;
       r *= vf * 0.94;
       g *= vf;
       b *= vf * 0.9;
     }
 
-    /* hillshade: directional light from the north-west */
-    var w = world.w;
+    /* Hillshade, kept gentle. Heavy relief shading is the single biggest thing
+     * that makes a tile map look like terrain data instead of like art. */
     var hL = x > 0 ? world.height[i - 1] : world.height[i];
     var hR = x < w - 1 ? world.height[i + 1] : world.height[i];
     var hU = y > 0 ? world.height[i - w] : world.height[i];
     var hD = y < world.h - 1 ? world.height[i + w] : world.height[i];
-    var shade = 1 + (hL - hR + (hU - hD)) * 2.4;
-    if (shade < 0.7) shade = 0.7;
-    if (shade > 1.32) shade = 1.32;
+    var shade = 1 + (hL - hR + (hU - hD)) * 1.5;
+    if (shade < 0.86) shade = 0.86;
+    if (shade > 1.16) shade = 1.16;
     r *= shade;
     g *= shade;
     b *= shade;
+
+    /* Biome outline: darken a tile that sits on the edge of its material
+     * family. Two cheap neighbour reads buy the crisp borders that define the
+     * pixel-art look. */
+    if (world.water[i] <= 3) {
+      var grp = def.group;
+      var edge =
+        (x > 0 && world.water[i - 1] <= 3 && WB.TERRAIN[world.terrain[i - 1]].group !== grp) ||
+        (y > 0 && world.water[i - w] <= 3 && WB.TERRAIN[world.terrain[i - w]].group !== grp);
+      if (edge) {
+        r *= 0.8;
+        g *= 0.8;
+        b *= 0.8;
+      }
+    }
 
     /* frost: below freezing, everything whitens. This is what makes seasons
      * and the ice-age power visible without touching the terrain array.
@@ -166,28 +220,57 @@
       b += (250 - b) * fr;
     }
 
-    /* water column */
+    /* water column, drawn in flat bands */
     var wat = world.water[i];
     if (wat > 0) {
-      var depth = Math.min(1, wat / 110);
-      var wr = WATER_SHALLOW[0] + (WATER_DEEP[0] - WATER_SHALLOW[0]) * depth;
-      var wg = WATER_SHALLOW[1] + (WATER_DEEP[1] - WATER_SHALLOW[1]) * depth;
-      var wb = WATER_SHALLOW[2] + (WATER_DEEP[2] - WATER_SHALLOW[2]) * depth;
+      var band = 0;
+      while (band < WATER_CUTS.length && wat > WATER_CUTS[band]) band++;
+      var wc = WATER_BANDS[band];
+      var wr = wc[0],
+        wg = wc[1],
+        wb = wc[2];
+
+      /* surface texture, damped with depth */
+      var wv = WAVE[(y & 31) * WAVE_N + (x & 31)] * WAVE_BY_BAND[band];
+      wr += wv;
+      wg += wv;
+      wb += wv * 0.6;
+
       /* frozen surface */
       if (frost >= 2) {
-        wr = wr * 0.35 + 178 * 0.65;
-        wg = wg * 0.35 + 214 * 0.65;
-        wb = wb * 0.35 + 232 * 0.65;
+        wr = wr * 0.3 + 186 * 0.7;
+        wg = wg * 0.3 + 220 * 0.7;
+        wb = wb * 0.3 + 236 * 0.7;
       }
-      var a = Math.min(0.96, 0.3 + wat / 46);
+
+      /* The shallowest band blends over the seabed so riverbeds and sandbars
+       * stay visible; everything deeper is opaque. */
+      var a = band === 0 ? 0.72 : 1;
       r += (wr - r) * a;
       g += (wg - g) * a;
       b += (wb - b) * a;
-      /* a brighter rim in the shallows reads as a shoreline */
-      if (wat > 3 && wat < 16) {
-        r += 18;
-        g += 24;
-        b += 26;
+
+      /* Foam: a bright rim on any water tile touching land, and a dark line
+       * just inside it. Together they draw the coastline. */
+      if (band <= 1) {
+        var touchesLand =
+          (x > 0 && world.water[i - 1] <= 3) ||
+          (x < w - 1 && world.water[i + 1] <= 3) ||
+          (y > 0 && world.water[i - w] <= 3) ||
+          (y < world.h - 1 && world.water[i + w] <= 3);
+        if (touchesLand) {
+          r += 46;
+          g += 52;
+          b += 44;
+        }
+      } else if (band === 2) {
+        var nearShore =
+          (x > 0 && world.water[i - 1] <= WATER_CUTS[0]) || (y > 0 && world.water[i - w] <= WATER_CUTS[0]);
+        if (nearShore) {
+          r *= 0.82;
+          g *= 0.82;
+          b *= 0.86;
+        }
       }
     }
 
@@ -228,8 +311,10 @@
     if (this.game.settings.showBorders && world.owner[i]) {
       var col = this.kingdomRgb(world.owner[i]);
       if (col) {
+        /* A crisp thin frontier with only a faint wash inside it. Tinting the
+         * interior heavily buries the terrain the territory is drawn on. */
         var isEdge = this.isBorderTile(i, x, y);
-        var bf = isEdge ? 0.62 : 0.2;
+        var bf = isEdge ? 0.45 : 0.13;
         r += (col[0] - r) * bf;
         g += (col[1] - g) * bf;
         b += (col[2] - b) * bf;
@@ -311,11 +396,21 @@
 
   /* --- Entity passes ----------------------------------------------------- */
   Renderer.prototype.drawScenery = function (ctx, cam) {
-    if (!this.game.settings.showScenery || cam.zoom < 7) return;
+    /* Individual trees and rocks are a large part of the look, so they come in
+     * as early as the tiles are big enough to hold a recognisable sprite. */
+    if (!this.game.settings.showScenery || cam.zoom < 5) return;
     var world = this.game.world;
     var v = cam.visibleTiles();
     var scale = cam.zoom / 6;
     var drawn = 0;
+
+    /* Thin the planting out when a lot of the map is on screen, so the sprite
+     * count stays near a fixed budget instead of scaling with the view.
+     * A hard cap alone would not do: this loop walks the view in row order, so
+     * stopping at a limit would leave the bottom of the screen bare rather than
+     * spreading the loss evenly. */
+    var visible = (v.x1 - v.x0 + 1) * (v.y1 - v.y0 + 1);
+    var allow = Math.min(1, SCENERY_BUDGET / Math.max(1, visible * 0.35));
     for (var y = v.y0; y <= v.y1; y++) {
       for (var x = v.x0; x <= v.x1; x++) {
         var i = y * world.w + x;
@@ -331,16 +426,18 @@
         if (!name) continue;
 
         var hash = tileHash(i);
-        /* Density scales with biomass, and the subset is stable per tile. */
-        var need = t === T.DESERT || t === T.ROCK || t === T.MOUNTAIN ? 0.86 : 0.42;
-        if ((hash & 255) / 255 < need) continue;
+        /* Density scales with biomass, and the subset is stable per tile, so
+         * a given tree stays put between frames instead of flickering. */
+        var sparse = t === T.DESERT || t === T.ROCK || t === T.MOUNTAIN;
+        var density = (sparse ? 0.14 : 0.58) * allow;
+        if ((hash & 255) / 255 > density) continue;
         if (world.fuel[i] < WB.TERRAIN[t].fuel * 0.25 && t !== T.ROCK && t !== T.MOUNTAIN) continue;
 
         var jx = (((hash >>> 8) & 255) / 255 - 0.5) * 0.5;
         var jy = (((hash >>> 16) & 255) / 255 - 0.5) * 0.5;
         var p = cam.worldToScreen(x + 0.5 + jx, y + 0.5 + jy);
         WB.Atlas.draw(ctx, name, p.x, p.y - scale * 1.5, scale);
-        if (++drawn > 6000) return;
+        drawn++;
       }
     }
   };
@@ -442,12 +539,16 @@
   Renderer.prototype.drawDayNight = function (ctx, cam) {
     if (!this.game.settings.dayNight) return;
     var phase = this.game.timeOfDay(); /* 0 = midnight, 0.5 = noon */
-    var dark = Math.max(0, Math.cos(phase * Math.PI * 2) * 0.5 + 0.5);
-    dark = Math.pow(1 - dark, 1.4) * 0.62;
+    /* cos is +1 at phase 0, so daylight is its negation - getting this sign
+     * backwards darkens the map at noon and lights it at midnight. */
+    var light = 0.5 - Math.cos(phase * Math.PI * 2) * 0.5;
+    /* Night should read as evening light, not as a dimmer switch. Past about
+     * 0.45 the terrain palette stops being legible and the map turns to mud. */
+    var dark = Math.pow(1 - light, 1.4) * 0.45;
     if (dark < 0.01) return;
     ctx.save();
     ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = 'rgba(12, 20, 52, ' + dark.toFixed(3) + ')';
+    ctx.fillStyle = 'rgba(18, 24, 68, ' + dark.toFixed(3) + ')';
     ctx.fillRect(0, 0, cam.vw, cam.vh);
     ctx.restore();
   };
