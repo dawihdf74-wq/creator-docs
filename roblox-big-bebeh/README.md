@@ -24,13 +24,23 @@ into an empty place, press Play, and it works.
 
 ## Installing
 
-### Option A — Rojo (recommended)
+### Option A — open the place file (easiest)
+
+Download **`BigBebehCookieCollector.rbxlx`** from this folder and either
+double-click it, or in Studio use **File → Open from File…** and pick it.
+Everything is already wired up — press **Play**.
+
+To put it into a game you are already working on instead, use
+**File → Open from File…** to open it as its own place, then copy
+`BigBebehShared`, `BigBebehGame` and `BigBebehClient` across.
+
+### Option B — Rojo
 
 ```sh
 rojo serve   # from this folder, then connect from the Roblox Studio plugin
 ```
 
-### Option B — by hand in Studio
+### Option C — by hand in Studio
 
 Create these and paste in the matching file's contents:
 

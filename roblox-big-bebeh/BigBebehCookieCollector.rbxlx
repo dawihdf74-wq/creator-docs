@@ -1,0 +1,1715 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+<Meta name="ExplicitAutoJoints">true</Meta>
+<Item class="Workspace" referent="RBX9">
+<Properties>
+<string name="Name">Workspace</string>
+</Properties>
+</Item>
+<Item class="Lighting" referent="RBX10">
+<Properties>
+<string name="Name">Lighting</string>
+</Properties>
+</Item>
+<Item class="ReplicatedStorage" referent="RBX11">
+<Properties>
+<string name="Name">ReplicatedStorage</string>
+</Properties>
+<Item class="Folder" referent="RBX3">
+<Properties>
+<string name="Name">BigBebehShared</string>
+</Properties>
+<Item class="ModuleScript" referent="RBX1">
+<Properties>
+<string name="Name">GameConfig</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	GameConfig
+	Every tunable number for the "Feed Big Bebeh" cookie game lives here.
+	Tweak these values and the whole world rebuilds itself on the next run.
+]]
+
+local GameConfig = {}
+
+-- Saving -------------------------------------------------------------------
+GameConfig.SaveEnabled = true
+GameConfig.DataStoreName = "BigBebehCookies_v1"
+GameConfig.AutosaveInterval = 120
+
+-- Gameplay tuning ----------------------------------------------------------
+GameConfig.FeedRadius = 16 -- studs; walk this close to Big Bebeh to auto-feed
+GameConfig.FeedInterval = 0.3 -- seconds between auto-feed checks
+GameConfig.CookieRespawnTime = 5 -- seconds before a picked-up cookie comes back
+GameConfig.CollectRange = 14 -- server-side sanity check on pickups
+GameConfig.VoidY = -60 -- fall below this and you get placed back on your area
+
+-- World layout -------------------------------------------------------------
+GameConfig.PlatformSize = Vector3.new(220, 6, 220)
+GameConfig.AreaSpacing = 300 -- centre-to-centre distance along +X
+GameConfig.BridgeWidth = 26
+
+-- Areas --------------------------------------------------------------------
+-- Feed the Bebeh in area N its HungerGoal to unlock area N + 1.
+-- CarryCapacity is how many cookies you can hold once that area is unlocked.
+GameConfig.Areas = {
+	{
+		Name = "Cookie Nursery",
+		FloorColor = Color3.fromRGB(126, 196, 122),
+		AccentColor = Color3.fromRGB(255, 232, 120),
+		CookieColor = Color3.fromRGB(214, 168, 106),
+		CookieValue = 1,
+		CookieCount = 40,
+		CarryCapacity = 30,
+		HungerGoal = 60,
+		BebehName = "Baby Bebeh",
+		BebehScale = 1,
+	},
+	{
+		Name = "Sugar Sandbox",
+		FloorColor = Color3.fromRGB(238, 205, 152),
+		AccentColor = Color3.fromRGB(255, 170, 200),
+		CookieColor = Color3.fromRGB(240, 214, 168),
+		CookieValue = 4,
+		CookieCount = 40,
+		CarryCapacity = 120,
+		HungerGoal = 400,
+		BebehName = "Bigger Bebeh",
+		BebehScale = 1.35,
+	},
+	{
+		Name = "Frosting Fields",
+		FloorColor = Color3.fromRGB(160, 214, 236),
+		AccentColor = Color3.fromRGB(255, 255, 255),
+		CookieColor = Color3.fromRGB(255, 236, 244),
+		CookieValue = 15,
+		CookieCount = 40,
+		CarryCapacity = 450,
+		HungerGoal = 1800,
+		BebehName = "Chonky Bebeh",
+		BebehScale = 1.75,
+	},
+	{
+		Name = "Choco Chip Canyon",
+		FloorColor = Color3.fromRGB(120, 84, 60),
+		AccentColor = Color3.fromRGB(196, 132, 88),
+		CookieColor = Color3.fromRGB(96, 62, 40),
+		CookieValue = 60,
+		CookieCount = 40,
+		CarryCapacity = 1800,
+		HungerGoal = 9000,
+		BebehName = "Mega Bebeh",
+		BebehScale = 2.2,
+	},
+	{
+		Name = "Golden Crumb Summit",
+		FloorColor = Color3.fromRGB(226, 186, 84),
+		AccentColor = Color3.fromRGB(255, 246, 190),
+		CookieColor = Color3.fromRGB(255, 214, 88),
+		CookieValue = 250,
+		CookieCount = 40,
+		CarryCapacity = 7500,
+		HungerGoal = 45000,
+		BebehName = "BIG BEBEH",
+		BebehScale = 2.8,
+	},
+}
+
+-- Helpers ------------------------------------------------------------------
+
+function GameConfig.getAreaCenter(areaIndex: number): Vector3
+	return Vector3.new((areaIndex - 1) * GameConfig.AreaSpacing, 0, 0)
+end
+
+function GameConfig.getCapacity(maxArea: number): number
+	local area = GameConfig.Areas[math.clamp(maxArea, 1, #GameConfig.Areas)]
+	return area.CarryCapacity
+end
+
+-- Turns 45000 into "45K" so the HUD never overflows.
+function GameConfig.abbreviate(n: number): string
+	local suffixes = { "", "K", "M", "B", "T" }
+	local tier = 0
+	local value = n
+	while value >= 1000 and tier < #suffixes - 1 do
+		value /= 1000
+		tier += 1
+	end
+	if tier == 0 then
+		return string.format("%d", value)
+	end
+	-- "45.0K" reads worse than "45K", so drop a trailing zero decimal.
+	local text = string.gsub(string.format("%.1f", value), "%.0$", "")
+	return text .. suffixes[tier + 1]
+end
+
+return GameConfig
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX2">
+<Properties>
+<string name="Name">Remotes</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	Remotes
+	Creates the RemoteEvent folder on the server, waits for it on the client.
+	require() this from either side and index the events by name.
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FOLDER_NAME = "BigBebehRemotes"
+local REMOTE_NAMES = {
+	"SyncState", -- server -> client: the player's full progress table
+	"Toast", -- server -> client: a short message for the notification stack
+	"CookiePop", -- server -> client: "+N" floating text at a world position
+	"FeedBurst", -- server -> client: make a Bebeh bounce and spit crumbs
+}
+
+local folder: Folder
+
+if RunService:IsServer() then
+	folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME) :: Folder
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = FOLDER_NAME
+		folder.Parent = ReplicatedStorage
+	end
+	for _, name in REMOTE_NAMES do
+		if not folder:FindFirstChild(name) then
+			local remote = Instance.new("RemoteEvent")
+			remote.Name = name
+			remote.Parent = folder
+		end
+	end
+else
+	folder = ReplicatedStorage:WaitForChild(FOLDER_NAME) :: Folder
+end
+
+local Remotes = {}
+for _, name in REMOTE_NAMES do
+	Remotes[name] = folder:WaitForChild(name) :: RemoteEvent
+end
+
+return Remotes
+]]></ProtectedString>
+</Properties>
+</Item>
+</Item>
+</Item>
+<Item class="ServerScriptService" referent="RBX12">
+<Properties>
+<string name="Name">ServerScriptService</string>
+</Properties>
+<Item class="Script" referent="RBX7">
+<Properties>
+<string name="Name">BigBebehGame</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	Big Bebeh — Cookie Collector (server)
+
+	The loop:
+	  1. Cookies lie around each area. Walk over one to pick it up.
+	  2. Your hands only hold so many; when they are full, go feed Big Bebeh.
+	  3. Stand on his pad and he eats everything you are carrying.
+	  4. Fill his hunger bar and the gate to the next area opens for you.
+
+	All tuning lives in ReplicatedStorage/BigBebehShared/GameConfig.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
+
+local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
+local Remotes = require(ReplicatedStorage.BigBebehShared.Remotes)
+local PlayerState = require(script.PlayerState)
+local WorldBuilder = require(script.WorldBuilder)
+
+local COOKIE_COLOR = Color3.fromRGB(255, 226, 140)
+local UNLOCK_COLOR = Color3.fromRGB(140, 255, 170)
+
+local world = WorldBuilder.build()
+
+local cookiePool = Instance.new("Folder")
+cookiePool.Name = "CookiePool"
+cookiePool.Parent = ServerStorage
+
+-- Cookie spawning ----------------------------------------------------------
+
+-- Somewhere on the platform that is not on top of the Bebeh or his feed pad.
+local function randomCookiePosition(areaIndex: number): Vector3
+	local center = GameConfig.getAreaCenter(areaIndex)
+	local halfX = GameConfig.PlatformSize.X / 2 - 22
+	local halfZ = GameConfig.PlatformSize.Z / 2 - 22
+
+	for _ = 1, 12 do
+		local pos = center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(-halfZ, halfZ))
+		-- The Bebeh stands at z = -70 relative to the area centre.
+		if (pos - (center + Vector3.new(0, 0, -70))).Magnitude > GameConfig.FeedRadius + 22 then
+			return pos
+		end
+	end
+	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(20, halfZ))
+end
+
+local function createCookie(areaIndex: number): Model
+	local cfg = GameConfig.Areas[areaIndex]
+
+	local model = Instance.new("Model")
+	model.Name = "Cookie"
+
+	local disc = Instance.new("Part")
+	disc.Name = "Disc"
+	disc.Shape = Enum.PartType.Cylinder
+	disc.Size = Vector3.new(0.6, 3.2, 3.2)
+	disc.Color = cfg.CookieColor
+	disc.Material = Enum.Material.Sand
+	disc.Anchored = true
+	disc.CanCollide = false
+	disc.CanTouch = true
+	disc.Parent = model
+	model.PrimaryPart = disc
+
+	-- Chocolate chips scattered on the top face.
+	for i = 1, 4 do
+		local angle = (i / 4) * math.pi * 2 + math.random() * 0.6
+		local chip = Instance.new("Part")
+		chip.Name = "Chip"
+		chip.Shape = Enum.PartType.Ball
+		chip.Size = Vector3.new(0.7, 0.7, 0.7)
+		chip.Color = cfg.CookieColor:Lerp(Color3.fromRGB(40, 24, 14), 0.75)
+		chip.Material = Enum.Material.SmoothPlastic
+		chip.Anchored = true
+		chip.CanCollide = false
+		chip.CanTouch = false
+		chip.CanQuery = false
+		chip.Parent = model
+		chip:SetAttribute("Offset", Vector3.new(math.cos(angle) * 0.9, 0.35, math.sin(angle) * 0.9))
+	end
+
+	model:SetAttribute("AreaIndex", areaIndex)
+	model:SetAttribute("Value", cfg.CookieValue)
+
+	return model
+end
+
+-- Places a cookie model at a fresh random spot in its area.
+local function placeCookie(model: Model)
+	local areaIndex = model:GetAttribute("AreaIndex") :: number
+	local pos = randomCookiePosition(areaIndex)
+	local disc = model.PrimaryPart :: Part
+	-- The cylinder's axis runs along its local X, so roll it 90° to lie flat.
+	disc.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+	for _, chip in model:GetChildren() do
+		if chip:IsA("BasePart") and chip.Name == "Chip" then
+			chip.Position = pos + (chip:GetAttribute("Offset") :: Vector3)
+		end
+	end
+	model.Parent = world.cookiesFolder
+end
+
+-- Player helpers -----------------------------------------------------------
+
+local lastToast: { [Player]: number } = {}
+
+local function toast(player: Player, message: string, color: Color3?, throttleSeconds: number?)
+	if throttleSeconds then
+		local now = os.clock()
+		if lastToast[player] and now - lastToast[player] < throttleSeconds then
+			return
+		end
+		lastToast[player] = now
+	end
+	Remotes.Toast:FireClient(player, message, color or Color3.fromRGB(255, 255, 255))
+end
+
+local function sync(player: Player)
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+
+	local stats = player:FindFirstChild("leaderstats")
+	if stats then
+		stats.Cookies.Value = state.carried
+		stats.Fed.Value = state.totalFed
+		stats.Area.Value = state.maxArea
+	end
+
+	Remotes.SyncState:FireClient(player, {
+		maxArea = state.maxArea,
+		carried = state.carried,
+		capacity = GameConfig.getCapacity(state.maxArea),
+		fed = state.fed,
+		totalFed = state.totalFed,
+	})
+end
+
+local function areaAtPosition(position: Vector3): number
+	local index = math.round(position.X / GameConfig.AreaSpacing) + 1
+	return math.clamp(index, 1, #GameConfig.Areas)
+end
+
+local function teleportToArea(player: Player, areaIndex: number)
+	local character = player.Character
+	if not character then
+		return
+	end
+	local center = GameConfig.getAreaCenter(areaIndex)
+	character:PivotTo(CFrame.new(center + Vector3.new(0, 6, 70)))
+end
+
+-- Collecting ---------------------------------------------------------------
+
+local function collect(player: Player, model: Model)
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+
+	local areaIndex = model:GetAttribute("AreaIndex") :: number
+	if state.maxArea < areaIndex then
+		toast(player, `Feed {GameConfig.Areas[areaIndex - 1].BebehName} first!`, nil, 3)
+		return
+	end
+
+	local capacity = GameConfig.getCapacity(state.maxArea)
+	if state.carried >= capacity then
+		toast(player, "Hands full! Go feed Big Bebeh 🍪", Color3.fromRGB(255, 180, 120), 3)
+		return
+	end
+
+	-- Distance check so a mis-fired Touched can't grab a cookie across the map.
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not root or not model.PrimaryPart then
+		return
+	end
+	if (root.Position - model.PrimaryPart.Position).Magnitude > GameConfig.CollectRange then
+		return
+	end
+
+	local value = model:GetAttribute("Value") :: number
+	local gained = math.min(value, capacity - state.carried)
+	state.carried += gained
+
+	Remotes.CookiePop:FireClient(player, model.PrimaryPart.Position, `+{GameConfig.abbreviate(gained)}`, COOKIE_COLOR)
+	sync(player)
+
+	-- Hide it, then bring it back somewhere else on the same platform.
+	model.Parent = cookiePool
+	task.delay(GameConfig.CookieRespawnTime, function()
+		if model.Parent == cookiePool then
+			placeCookie(model)
+		end
+	end)
+end
+
+local function armCookie(model: Model)
+	local disc = model.PrimaryPart :: Part
+	disc.Touched:Connect(function(hit)
+		-- Ignore touches while the cookie is pooled or already being claimed.
+		if model.Parent ~= world.cookiesFolder then
+			return
+		end
+		local character = hit.Parent
+		if not character or not character:FindFirstChildOfClass("Humanoid") then
+			return
+		end
+		local player = Players:GetPlayerFromCharacter(character)
+		if player then
+			collect(player, model)
+		end
+	end)
+end
+
+for areaIndex = 1, #GameConfig.Areas do
+	for _ = 1, GameConfig.Areas[areaIndex].CookieCount do
+		local cookie = createCookie(areaIndex)
+		placeCookie(cookie)
+		armCookie(cookie)
+	end
+end
+
+-- Feeding ------------------------------------------------------------------
+
+local bebehs: { [number]: Model } = {}
+for _, model in CollectionService:GetTagged("BigBebeh") do
+	bebehs[model:GetAttribute("AreaIndex") :: number] = model
+end
+
+local function feed(player: Player, areaIndex: number)
+	local state = PlayerState.get(player)
+	if not state or state.carried <= 0 then
+		return
+	end
+
+	local cfg = GameConfig.Areas[areaIndex]
+	local remaining = cfg.HungerGoal - state.fed[areaIndex]
+	if remaining <= 0 then
+		return
+	end
+
+	local amount = math.min(state.carried, remaining)
+	state.carried -= amount
+	state.fed[areaIndex] += amount
+	state.totalFed += amount
+
+	local bebeh = bebehs[areaIndex]
+	if bebeh then
+		Remotes.FeedBurst:FireClient(player, bebeh, amount)
+	end
+
+	if state.fed[areaIndex] >= cfg.HungerGoal then
+		if areaIndex < #GameConfig.Areas and state.maxArea == areaIndex then
+			state.maxArea = areaIndex + 1
+			local nextCfg = GameConfig.Areas[state.maxArea]
+			toast(player, `🎉 {nextCfg.Name} unlocked! Carry up to {GameConfig.abbreviate(nextCfg.CarryCapacity)}`, UNLOCK_COLOR)
+		elseif areaIndex == #GameConfig.Areas then
+			toast(player, "🏆 BIG BEBEH IS FULL. You win! 🏆", UNLOCK_COLOR)
+		end
+	end
+
+	sync(player)
+end
+
+task.spawn(function()
+	while true do
+		task.wait(GameConfig.FeedInterval)
+		for player, state in PlayerState.all() do
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if not root then
+				continue
+			end
+
+			if root.Position.Y < GameConfig.VoidY then
+				teleportToArea(player, math.min(state.maxArea, areaAtPosition(root.Position)))
+				continue
+			end
+
+			if state.carried <= 0 then
+				continue
+			end
+
+			for areaIndex = 1, state.maxArea do
+				local bebeh = bebehs[areaIndex]
+				if not bebeh or state.fed[areaIndex] >= GameConfig.Areas[areaIndex].HungerGoal then
+					continue
+				end
+				-- Flat distance: his pivot sits well above the player's head.
+				local offset = bebeh:GetPivot().Position - root.Position
+				if Vector2.new(offset.X, offset.Z).Magnitude <= GameConfig.FeedRadius + 8 then
+					feed(player, areaIndex)
+					break
+				end
+			end
+		end
+	end
+end)
+
+-- Players ------------------------------------------------------------------
+
+local function onPlayerAdded(player: Player)
+	local state = PlayerState.load(player)
+
+	local stats = Instance.new("Folder")
+	stats.Name = "leaderstats"
+	for _, name in { "Cookies", "Fed", "Area" } do
+		local value = Instance.new("IntValue")
+		value.Name = name
+		value.Parent = stats
+	end
+	stats.Parent = player
+
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		sync(player)
+	end)
+
+	sync(player)
+	toast(player, `Welcome! Collect cookies and feed {GameConfig.Areas[state.maxArea].BebehName}.`, COOKIE_COLOR)
+end
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+for _, player in Players:GetPlayers() do
+	task.spawn(onPlayerAdded, player)
+end
+
+Players.PlayerRemoving:Connect(function(player)
+	lastToast[player] = nil
+	PlayerState.release(player)
+end)
+
+-- The client pings this once its UI is built, so it never misses the first sync.
+Remotes.SyncState.OnServerEvent:Connect(function(player)
+	sync(player)
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(GameConfig.AutosaveInterval)
+		for player in PlayerState.all() do
+			PlayerState.save(player)
+		end
+	end
+end)
+
+game:BindToClose(function()
+	for player in PlayerState.all() do
+		PlayerState.save(player)
+	end
+end)
+]]></ProtectedString>
+</Properties>
+<Item class="ModuleScript" referent="RBX4">
+<Properties>
+<string name="Name">PlayerState</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	PlayerState
+	Per-player progress, with optional DataStore persistence.
+
+	state = {
+		maxArea  = 1,          -- highest area unlocked
+		carried  = 0,          -- cookies currently in hand
+		fed      = { 12, 0 },  -- cookies fed to each area's Bebeh
+		totalFed = 12,
+	}
+]]
+
+local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
+
+local PlayerState = {}
+
+local states: { [Player]: any } = {}
+
+local store: DataStore? = nil
+if GameConfig.SaveEnabled then
+	local ok, result = pcall(function()
+		return DataStoreService:GetDataStore(GameConfig.DataStoreName)
+	end)
+	if ok then
+		store = result
+	else
+		warn(`[BigBebeh] DataStore unavailable, running without saves: {result}`)
+	end
+end
+
+local function defaultState()
+	local fed = table.create(#GameConfig.Areas, 0)
+	return {
+		maxArea = 1,
+		carried = 0,
+		fed = fed,
+		totalFed = 0,
+	}
+end
+
+-- Anything loaded from a DataStore is untrusted: an older save may be missing
+-- fields, or have more/fewer areas than the current config.
+local function sanitize(raw: any)
+	local state = defaultState()
+	if type(raw) ~= "table" then
+		return state
+	end
+
+	if type(raw.maxArea) == "number" then
+		state.maxArea = math.clamp(math.floor(raw.maxArea), 1, #GameConfig.Areas)
+	end
+	if type(raw.carried) == "number" and raw.carried >= 0 then
+		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state.maxArea))
+	end
+	if type(raw.fed) == "table" then
+		for i = 1, #GameConfig.Areas do
+			local value = raw.fed[i]
+			if type(value) == "number" and value >= 0 then
+				state.fed[i] = math.min(math.floor(value), GameConfig.Areas[i].HungerGoal)
+			end
+		end
+	end
+	if type(raw.totalFed) == "number" and raw.totalFed >= 0 then
+		state.totalFed = math.floor(raw.totalFed)
+	end
+
+	return state
+end
+
+local function key(player: Player): string
+	return `player_{player.UserId}`
+end
+
+function PlayerState.load(player: Player)
+	local raw = nil
+	if store then
+		local ok, result = pcall(function()
+			return store:GetAsync(key(player))
+		end)
+		if ok then
+			raw = result
+		else
+			warn(`[BigBebeh] Load failed for {player.Name}: {result}`)
+		end
+	end
+
+	local state = sanitize(raw)
+	states[player] = state
+	return state
+end
+
+function PlayerState.get(player: Player)
+	return states[player]
+end
+
+function PlayerState.save(player: Player)
+	local state = states[player]
+	if not state or not store then
+		return
+	end
+	local ok, err = pcall(function()
+		store:SetAsync(key(player), state)
+	end)
+	if not ok then
+		warn(`[BigBebeh] Save failed for {player.Name}: {err}`)
+	end
+end
+
+function PlayerState.release(player: Player)
+	PlayerState.save(player)
+	states[player] = nil
+end
+
+function PlayerState.all()
+	return states
+end
+
+return PlayerState
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX5">
+<Properties>
+<string name="Name">WorldBuilder</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	WorldBuilder
+	Generates the whole map from GameConfig: one floating platform per area, a
+	bridge between each pair, a locked gate on every bridge, and a Big Bebeh
+	waiting to be fed on each platform.
+
+	Everything lands in Workspace.BigBebehWorld. It is rebuilt from scratch on
+	each server start, so you can safely delete it in Studio and hit Play again.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
+local BebehBuilder = require(script.Parent.BebehBuilder)
+
+local WorldBuilder = {}
+
+local WORLD_NAME = "BigBebehWorld"
+
+local function makeAnchoredPart(name: string, size: Vector3, cf: CFrame, color: Color3, parent: Instance): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Anchored = true
+	p.Material = Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	p.Parent = parent
+	return p
+end
+
+local function makeSign(text: string, size: UDim2, adornee: BasePart, offsetY: number): BillboardGui
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "Sign"
+	billboard.Size = size
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, offsetY, 0)
+	billboard.MaxDistance = 300
+	billboard.Adornee = adornee
+
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.FredokaOne
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextStrokeTransparency = 0
+	label.TextScaled = true
+	label.Parent = billboard
+
+	billboard.Parent = adornee
+	return billboard
+end
+
+-- One platform, its fence, its name sign and its Bebeh.
+local function buildArea(areaIndex: number, parent: Instance)
+	local cfg = GameConfig.Areas[areaIndex]
+	local center = GameConfig.getAreaCenter(areaIndex)
+	local size = GameConfig.PlatformSize
+
+	local folder = Instance.new("Folder")
+	folder.Name = `Area{areaIndex}_{cfg.Name}`
+	folder.Parent = parent
+
+	-- Floor. Its top surface sits exactly at Y = 0.
+	local floor = makeAnchoredPart(
+		"Floor",
+		size,
+		CFrame.new(center + Vector3.new(0, -size.Y / 2, 0)),
+		cfg.FloorColor,
+		folder
+	)
+	floor.Material = Enum.Material.Grass
+
+	-- A skirt underneath so the platform reads as a floating island.
+	makeAnchoredPart(
+		"Base",
+		Vector3.new(size.X * 0.82, 22, size.Z * 0.82),
+		CFrame.new(center + Vector3.new(0, -size.Y - 11, 0)),
+		cfg.FloorColor:Lerp(Color3.new(0, 0, 0), 0.4),
+		folder
+	).Material = Enum.Material.Slate
+
+	-- Low fence around the rim so nobody walks off by accident.
+	local fenceHeight = 5
+	for _, sz in { -1, 1 } do
+		makeAnchoredPart(
+			"Fence",
+			Vector3.new(size.X, fenceHeight, 2),
+			CFrame.new(center + Vector3.new(0, fenceHeight / 2, sz * size.Z / 2)),
+			cfg.AccentColor,
+			folder
+		)
+	end
+
+	-- The +X and -X walls have a doorway cut into them wherever a bridge lands:
+	-- one on -X unless this is the first area, one on +X unless it is the last.
+	local sideRun = (size.Z - GameConfig.BridgeWidth) / 2
+	local hasBridge = { [-1] = areaIndex > 1, [1] = areaIndex < #GameConfig.Areas }
+	for _, sx in { -1, 1 } do
+		if hasBridge[sx] then
+			for _, sz in { -1, 1 } do
+				makeAnchoredPart(
+					"Fence",
+					Vector3.new(2, fenceHeight, sideRun),
+					CFrame.new(
+						center
+							+ Vector3.new(sx * size.X / 2, fenceHeight / 2, sz * (GameConfig.BridgeWidth + sideRun) / 2)
+					),
+					cfg.AccentColor,
+					folder
+				)
+			end
+		else
+			makeAnchoredPart(
+				"Fence",
+				Vector3.new(2, fenceHeight, size.Z),
+				CFrame.new(center + Vector3.new(sx * size.X / 2, fenceHeight / 2, 0)),
+				cfg.AccentColor,
+				folder
+			)
+		end
+	end
+
+	-- Area name floating over the middle of the platform.
+	local marker = makeAnchoredPart(
+		"NameMarker",
+		Vector3.new(1, 1, 1),
+		CFrame.new(center + Vector3.new(0, 26, 60)),
+		cfg.AccentColor,
+		folder
+	)
+	marker.Transparency = 1
+	marker.CanCollide = false
+	makeSign(`{areaIndex}. {cfg.Name}`, UDim2.fromScale(24, 5), marker, 0)
+
+	-- Big Bebeh, at the back of the platform, facing the middle.
+	local bebehPos = center + Vector3.new(0, 0, -70)
+	local bebeh = BebehBuilder.build(areaIndex, cfg, CFrame.lookAt(bebehPos, bebehPos + Vector3.new(0, 0, 1)))
+	bebeh.Parent = folder
+
+	-- A soft glowing pad so players know where to stand to feed him.
+	local diameter = GameConfig.FeedRadius * 2
+	local pad = makeAnchoredPart(
+		"FeedPad",
+		Vector3.new(0.4, diameter, diameter),
+		CFrame.new(bebehPos + Vector3.new(0, 0.2, 8)) * CFrame.Angles(0, 0, math.rad(90)),
+		cfg.AccentColor,
+		folder
+	)
+	pad.Shape = Enum.PartType.Cylinder
+	pad.CanCollide = false
+	pad.CanTouch = false
+	pad.Material = Enum.Material.Neon
+	pad.Transparency = 0.6
+
+	return { folder = folder, bebeh = bebeh, center = center }
+end
+
+-- The bridge from `areaIndex` to `areaIndex + 1`, plus the gate that blocks it.
+local function buildBridge(areaIndex: number, parent: Instance)
+	local fromCenter = GameConfig.getAreaCenter(areaIndex)
+	local nextCfg = GameConfig.Areas[areaIndex + 1]
+	local size = GameConfig.PlatformSize
+	local gapLength = GameConfig.AreaSpacing - size.X
+
+	local folder = Instance.new("Folder")
+	folder.Name = `Bridge{areaIndex}to{areaIndex + 1}`
+	folder.Parent = parent
+
+	local bridgeCenter = fromCenter + Vector3.new(size.X / 2 + gapLength / 2, -1.5, 0)
+	makeAnchoredPart(
+		"Deck",
+		Vector3.new(gapLength, 3, GameConfig.BridgeWidth),
+		CFrame.new(bridgeCenter),
+		Color3.fromRGB(168, 128, 92),
+		folder
+	).Material = Enum.Material.WoodPlanks
+
+	for _, sz in { -1, 1 } do
+		makeAnchoredPart(
+			"Rail",
+			Vector3.new(gapLength, 4, 1.5),
+			CFrame.new(bridgeCenter + Vector3.new(0, 3, sz * GameConfig.BridgeWidth / 2)),
+			Color3.fromRGB(120, 88, 62),
+			folder
+		)
+	end
+
+	-- The gate. Solid until this player has fed the Bebeh behind them; the
+	-- client turns it off locally once the area is unlocked.
+	local gate = makeAnchoredPart(
+		"Gate",
+		Vector3.new(2, 24, GameConfig.BridgeWidth + 3),
+		CFrame.new(fromCenter + Vector3.new(size.X / 2 + 3, 12, 0)),
+		nextCfg.AccentColor,
+		folder
+	)
+	gate.Material = Enum.Material.ForceField
+	gate.Transparency = 0.35
+	gate.CanCollide = true
+	gate:SetAttribute("AreaIndex", areaIndex + 1) -- the area this gate leads INTO
+	CollectionService:AddTag(gate, "AreaGate")
+
+	makeSign(`🔒 {nextCfg.Name}`, UDim2.fromScale(20, 6), gate, 16)
+
+	return folder
+end
+
+function WorldBuilder.build()
+	local existing = workspace:FindFirstChild(WORLD_NAME)
+	if existing then
+		existing:Destroy()
+	end
+	-- Studio's default baseplate would sit in the middle of everything.
+	local baseplate = workspace:FindFirstChild("Baseplate")
+	if baseplate then
+		baseplate:Destroy()
+	end
+
+	local world = Instance.new("Folder")
+	world.Name = WORLD_NAME
+	world.Parent = workspace
+
+	local areasFolder = Instance.new("Folder")
+	areasFolder.Name = "Areas"
+	areasFolder.Parent = world
+
+	local cookiesFolder = Instance.new("Folder")
+	cookiesFolder.Name = "Cookies"
+	cookiesFolder.Parent = world
+
+	local areas = {}
+	for i = 1, #GameConfig.Areas do
+		areas[i] = buildArea(i, areasFolder)
+		if i < #GameConfig.Areas then
+			buildBridge(i, areasFolder)
+		end
+	end
+
+	-- Spawn everyone at the front of area 1.
+	for _, old in workspace:GetDescendants() do
+		if old:IsA("SpawnLocation") and not old:IsDescendantOf(world) then
+			old:Destroy()
+		end
+	end
+	local spawnPart = Instance.new("SpawnLocation")
+	spawnPart.Name = "BebehSpawn"
+	spawnPart.Size = Vector3.new(12, 1, 12)
+	spawnPart.CFrame = CFrame.new(GameConfig.getAreaCenter(1) + Vector3.new(0, 0.5, 80))
+	spawnPart.Anchored = true
+	spawnPart.Color = GameConfig.Areas[1].AccentColor
+	spawnPart.Material = Enum.Material.Neon
+	spawnPart.Duration = 0
+	spawnPart.Parent = world
+
+	return {
+		world = world,
+		areas = areas,
+		cookiesFolder = cookiesFolder,
+	}
+end
+
+return WorldBuilder
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX6">
+<Properties>
+<string name="Name">BebehBuilder</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	BebehBuilder
+	Builds Big Bebeh out of parts: a chunky brown cube head, floppy yellow bunny
+	ears, sleepy closed eyes, blushy cheeks, a blue bib and a big blue pacifier.
+
+	Want your own model instead? Drop a Model named "BigBebeh" into ServerStorage
+	and this module will clone and scale that instead of building the blocky one.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local ServerStorage = game:GetService("ServerStorage")
+
+local BebehBuilder = {}
+
+local BROWN = Color3.fromRGB(150, 108, 74)
+local DARK_BROWN = Color3.fromRGB(118, 82, 55)
+local EAR_YELLOW = Color3.fromRGB(248, 226, 74)
+local BIB_BLUE = Color3.fromRGB(150, 215, 240)
+local PACI_BLUE = Color3.fromRGB(86, 150, 240)
+local PACI_PURPLE = Color3.fromRGB(150, 120, 226)
+local BLUSH = Color3.fromRGB(240, 140, 140)
+local DIAPER = Color3.fromRGB(245, 243, 236)
+
+local function makePart(name: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
+	local p = Instance.new("Part")
+	p.Name = name
+	p.Size = size
+	p.CFrame = cf
+	p.Color = color
+	p.Shape = shape or Enum.PartType.Block
+	p.Anchored = true
+	p.CanCollide = false
+	p.CanTouch = false
+	p.CanQuery = false
+	p.Material = Enum.Material.SmoothPlastic
+	p.TopSurface = Enum.SurfaceType.Smooth
+	p.BottomSurface = Enum.SurfaceType.Smooth
+	return p
+end
+
+-- The model is authored around the origin facing -Z (Roblox's "forward").
+local function buildBlockyBebeh(scale: number): Model
+	local model = Instance.new("Model")
+
+	local function s(n: number)
+		return n * scale
+	end
+	local function v(x: number, y: number, z: number)
+		return Vector3.new(s(x), s(y), s(z))
+	end
+	local function at(x: number, y: number, z: number)
+		return CFrame.new(s(x), s(y), s(z))
+	end
+
+	local pieces = {}
+	local function add(p: Part)
+		table.insert(pieces, p)
+		return p
+	end
+
+	-- Head ------------------------------------------------------------------
+	local head = add(makePart("Head", v(14, 13, 13), at(0, 0, 0), BROWN))
+	head.CanCollide = true
+	head.CanQuery = true
+	model.PrimaryPart = head
+
+	-- The darker band and yellow stripe running down his left side.
+	add(makePart("SideShade", v(0.3, 13.1, 13.1), at(-6.9, 0, 0), DARK_BROWN))
+	add(makePart("Stripe", v(0.35, 13.15, 3.2), at(-7.0, 0, 1.2), EAR_YELLOW))
+
+	-- Ears ------------------------------------------------------------------
+	-- Long floppy bunny ears splayed out in a V above the head.
+	for _, side in { -1, 1 } do
+		local ear = add(makePart("Ear", v(2.4, 13, 1.1), CFrame.new(), EAR_YELLOW))
+		ear.CFrame = at(side * 3.2, 6.5, 0.5)
+			* CFrame.Angles(math.rad(-8), 0, math.rad(side * 38))
+			* CFrame.new(0, s(6), 0)
+	end
+
+	-- Eyes ------------------------------------------------------------------
+	-- Sleepy closed eyes: two strokes per eye meeting at the bottom.
+	local faceZ = -6.6
+	for _, side in { -1, 1 } do
+		for _, lash in { -1, 1 } do
+			add(makePart(
+				"Eye",
+				v(0.55, 3.6, 0.35),
+				at(side * 3.6 + lash * 1.05, 2.6, faceZ) * CFrame.Angles(0, 0, math.rad(lash * -22)),
+				Color3.fromRGB(15, 15, 15)
+			))
+		end
+	end
+
+	-- Blushy cheeks ---------------------------------------------------------
+	for _, side in { -1, 1 } do
+		local cheek = add(makePart("Blush", v(3.4, 2.2, 1), at(side * 4.6, -0.6, faceZ + 0.1), BLUSH, Enum.PartType.Ball))
+		cheek.Transparency = 0.35
+	end
+
+	-- Bib -------------------------------------------------------------------
+	add(makePart("Bib", v(12.6, 4.2, 0.7), at(0, -4.4, faceZ - 0.1), BIB_BLUE))
+	add(makePart("BibLeft", v(2.6, 3.2, 0.7), at(-6.6, -2.6, faceZ - 0.1), BIB_BLUE))
+	add(makePart("BibRight", v(2.6, 3.2, 0.7), at(6.6, -2.6, faceZ - 0.1), BIB_BLUE))
+	-- Little bow in the middle of the bib.
+	for _, side in { -1, 1 } do
+		add(makePart(
+			"BowLoop",
+			v(2.2, 1.6, 0.6),
+			at(side * 1.6, -5.6, faceZ - 0.5) * CFrame.Angles(0, 0, math.rad(side * 18)),
+			BIB_BLUE
+		))
+	end
+	add(makePart("BowKnot", v(1.1, 1.1, 0.7), at(0, -5.5, faceZ - 0.6), Color3.fromRGB(180, 232, 248)))
+
+	-- Pacifier --------------------------------------------------------------
+	add(makePart("PaciShield", v(5.4, 3.6, 1.6), at(0, -2.4, faceZ - 0.7), BIB_BLUE, Enum.PartType.Ball))
+	add(makePart("PaciKnob", v(2.8, 2.8, 2.4), at(0, -2.2, faceZ - 1.8), PACI_BLUE, Enum.PartType.Ball))
+	-- The ring is faked with eight short segments so it reads as a torus.
+	for i = 0, 7 do
+		local angle = (i / 8) * math.pi * 2
+		add(makePart(
+			"PaciRing",
+			v(0.85, 0.85, 1.7),
+			at(0, -3.6, faceZ - 2.4)
+				* CFrame.new(math.cos(angle) * s(1.7), math.sin(angle) * s(1.7), 0)
+				* CFrame.Angles(0, 0, angle),
+			PACI_PURPLE
+		))
+	end
+
+	-- Diaper and feet -------------------------------------------------------
+	add(makePart("Diaper", v(13.4, 3.4, 13.4), at(0, -7.6, 0), DIAPER))
+	for _, side in { -1, 1 } do
+		add(makePart("Foot", v(4, 2.6, 5.4), at(side * 3.6, -10, -1.6), BROWN))
+	end
+	add(makePart("Tail", v(2.6, 2.6, 2.6), at(0, -8.6, 7), EAR_YELLOW, Enum.PartType.Ball))
+
+	for _, p in pieces do
+		p.Parent = model
+	end
+
+	return model
+end
+
+--[[
+	Builds one Bebeh for an area.
+	@param areaIndex  which area this Bebeh belongs to
+	@param areaConfig the entry from GameConfig.Areas
+	@param pivot      where to stand him, already facing the right way
+]]
+function BebehBuilder.build(areaIndex: number, areaConfig: any, pivot: CFrame): Model
+	local scale = areaConfig.BebehScale
+
+	local model: Model
+	local template = ServerStorage:FindFirstChild("BigBebeh")
+	if template and template:IsA("Model") then
+		model = template:Clone()
+		local ok, err = pcall(function()
+			model:ScaleTo(scale)
+		end)
+		if not ok then
+			warn(`[BigBebeh] Could not scale ServerStorage.BigBebeh: {err}`)
+		end
+	else
+		model = buildBlockyBebeh(scale)
+	end
+
+	model.Name = areaConfig.BebehName
+	model:PivotTo(pivot)
+
+	-- Lift him so his feet rest on the platform instead of sinking into it.
+	-- Measuring after the move keeps this correct for custom models too.
+	local boxCFrame, size = model:GetBoundingBox()
+	local bottom = boxCFrame.Position.Y - size.Y / 2
+	model:PivotTo(model:GetPivot() + Vector3.new(0, pivot.Position.Y - bottom, 0))
+	model:SetAttribute("AreaIndex", areaIndex)
+
+	-- Floating nameplate. The numbers are per-player, so the client fills them in.
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "BebehStatus"
+	billboard.Size = UDim2.fromScale(14, 4.2)
+	billboard.StudsOffsetWorldSpace = Vector3.new(0, size.Y / 2 + 4 * scale, 0)
+	billboard.MaxDistance = 220
+	billboard.AlwaysOnTop = false
+
+	local title = Instance.new("TextLabel")
+	title.Name = "Title"
+	title.Size = UDim2.fromScale(1, 0.42)
+	title.BackgroundTransparency = 1
+	title.Font = Enum.Font.FredokaOne
+	title.Text = areaConfig.BebehName
+	title.TextColor3 = Color3.fromRGB(255, 255, 255)
+	title.TextStrokeTransparency = 0
+	title.TextScaled = true
+	title.Parent = billboard
+
+	local status = Instance.new("TextLabel")
+	status.Name = "Status"
+	status.Position = UDim2.fromScale(0, 0.44)
+	status.Size = UDim2.fromScale(1, 0.3)
+	status.BackgroundTransparency = 1
+	status.Font = Enum.Font.GothamBold
+	status.Text = "Bring me cookies!"
+	status.TextColor3 = Color3.fromRGB(255, 240, 170)
+	status.TextStrokeTransparency = 0.2
+	status.TextScaled = true
+	status.Parent = billboard
+
+	local barBack = Instance.new("Frame")
+	barBack.Name = "BarBack"
+	barBack.Position = UDim2.fromScale(0.1, 0.78)
+	barBack.Size = UDim2.fromScale(0.8, 0.16)
+	barBack.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	barBack.BorderSizePixel = 0
+	barBack.Parent = billboard
+	Instance.new("UICorner").Parent = barBack
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "BarFill"
+	barFill.Size = UDim2.fromScale(0, 1)
+	barFill.BackgroundColor3 = Color3.fromRGB(255, 196, 60)
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBack
+	Instance.new("UICorner").Parent = barFill
+
+	-- Custom models may not set a PrimaryPart, so fall back to any part.
+	local anchorPart = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	billboard.Adornee = anchorPart
+	billboard.Parent = anchorPart or model
+
+	CollectionService:AddTag(model, "BigBebeh")
+	return model
+end
+
+return BebehBuilder
+]]></ProtectedString>
+</Properties>
+</Item>
+</Item>
+</Item>
+<Item class="ServerStorage" referent="RBX13">
+<Properties>
+<string name="Name">ServerStorage</string>
+</Properties>
+</Item>
+<Item class="StarterPlayer" referent="RBX15">
+<Properties>
+<string name="Name">StarterPlayer</string>
+</Properties>
+<Item class="StarterPlayerScripts" referent="RBX14">
+<Properties>
+<string name="Name">StarterPlayerScripts</string>
+</Properties>
+<Item class="LocalScript" referent="RBX8">
+<Properties>
+<string name="Name">BigBebehClient</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	Big Bebeh — Cookie Collector (client)
+
+	Owns everything the player sees: the HUD, the spinning cookies, the gate that
+	dissolves once you have unlocked the area behind it, and the little bits of
+	juice (floating "+5", Bebeh bouncing when he eats, toast messages).
+
+	Gates are opened *locally*. The server decides whether you are allowed
+	through; this script just stops drawing a wall you have already earned.
+]]
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+-- WaitForChild, because the client can start before ReplicatedStorage replicates.
+local sharedFolder = ReplicatedStorage:WaitForChild("BigBebehShared")
+local GameConfig = require(sharedFolder:WaitForChild("GameConfig"))
+local Remotes = require(sharedFolder:WaitForChild("Remotes"))
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+local COOKIE_YELLOW = Color3.fromRGB(255, 214, 120)
+local PANEL_BG = Color3.fromRGB(28, 26, 38)
+
+local state = {
+	maxArea = 1,
+	carried = 0,
+	capacity = GameConfig.Areas[1].CarryCapacity,
+	fed = table.create(#GameConfig.Areas, 0),
+	totalFed = 0,
+}
+
+-- HUD ----------------------------------------------------------------------
+
+local function corner(parent: Instance, radius: number)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius)
+	c.Parent = parent
+	return c
+end
+
+local function newLabel(props: { [string]: any }): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextScaled = true
+	for k, v in props do
+		(label :: any)[k] = v
+	end
+	return label
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "BigBebehHUD"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
+
+-- Area title, top centre.
+local areaTitle = newLabel({
+	Name = "AreaTitle",
+	AnchorPoint = Vector2.new(0.5, 0),
+	Position = UDim2.new(0.5, 0, 0, 12),
+	Size = UDim2.new(0, 460, 0, 46),
+	Font = Enum.Font.FredokaOne,
+	Text = GameConfig.Areas[1].Name,
+	TextStrokeTransparency = 0.35,
+})
+areaTitle.Parent = gui
+
+-- Toast stack, just under the title.
+local toastHolder = Instance.new("Frame")
+toastHolder.Name = "Toasts"
+toastHolder.AnchorPoint = Vector2.new(0.5, 0)
+toastHolder.Position = UDim2.new(0.5, 0, 0, 64)
+toastHolder.Size = UDim2.new(0, 520, 0, 160)
+toastHolder.BackgroundTransparency = 1
+toastHolder.Parent = gui
+
+local toastLayout = Instance.new("UIListLayout")
+toastLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+toastLayout.SortOrder = Enum.SortOrder.LayoutOrder
+toastLayout.Padding = UDim.new(0, 6)
+toastLayout.Parent = toastHolder
+
+-- Bottom panel: what you are carrying, and how hungry the Bebeh still is.
+local panel = Instance.new("Frame")
+panel.Name = "Panel"
+panel.AnchorPoint = Vector2.new(0.5, 1)
+panel.Position = UDim2.new(0.5, 0, 1, -18)
+panel.Size = UDim2.new(0, 440, 0, 132)
+panel.BackgroundColor3 = PANEL_BG
+panel.BackgroundTransparency = 0.15
+panel.BorderSizePixel = 0
+panel.Parent = gui
+corner(panel, 16)
+
+local carryLabel = newLabel({
+	Name = "Carry",
+	Position = UDim2.new(0, 16, 0, 8),
+	Size = UDim2.new(1, -32, 0, 34),
+	Font = Enum.Font.FredokaOne,
+	Text = "🍪 0 / 30",
+	TextColor3 = COOKIE_YELLOW,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+carryLabel.Parent = panel
+
+local carryBack = Instance.new("Frame")
+carryBack.Name = "CarryBar"
+carryBack.Position = UDim2.new(0, 16, 0, 44)
+carryBack.Size = UDim2.new(1, -32, 0, 10)
+carryBack.BackgroundColor3 = Color3.fromRGB(60, 56, 76)
+carryBack.BorderSizePixel = 0
+carryBack.Parent = panel
+corner(carryBack, 5)
+
+local carryFill = Instance.new("Frame")
+carryFill.Name = "Fill"
+carryFill.Size = UDim2.fromScale(0, 1)
+carryFill.BackgroundColor3 = COOKIE_YELLOW
+carryFill.BorderSizePixel = 0
+carryFill.Parent = carryBack
+corner(carryFill, 5)
+
+local hungerLabel = newLabel({
+	Name = "Hunger",
+	Position = UDim2.new(0, 16, 0, 62),
+	Size = UDim2.new(1, -32, 0, 28),
+	Text = "Baby Bebeh  0 / 60",
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+hungerLabel.Parent = panel
+
+local hungerBack = Instance.new("Frame")
+hungerBack.Name = "HungerBar"
+hungerBack.Position = UDim2.new(0, 16, 0, 92)
+hungerBack.Size = UDim2.new(1, -32, 0, 14)
+hungerBack.BackgroundColor3 = Color3.fromRGB(60, 56, 76)
+hungerBack.BorderSizePixel = 0
+hungerBack.Parent = panel
+corner(hungerBack, 7)
+
+local hungerFill = Instance.new("Frame")
+hungerFill.Name = "Fill"
+hungerFill.Size = UDim2.fromScale(0, 1)
+hungerFill.BackgroundColor3 = Color3.fromRGB(255, 150, 190)
+hungerFill.BorderSizePixel = 0
+hungerFill.Parent = hungerBack
+corner(hungerFill, 7)
+
+local hintLabel = newLabel({
+	Name = "Hint",
+	Position = UDim2.new(0, 16, 0, 108),
+	Size = UDim2.new(1, -32, 0, 20),
+	Font = Enum.Font.Gotham,
+	Text = "Walk over cookies, then stand on the glowing pad to feed him.",
+	TextColor3 = Color3.fromRGB(190, 186, 205),
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+hintLabel.Parent = panel
+
+-- HUD updates --------------------------------------------------------------
+
+local function currentAreaIndex(): number
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local x = root and root.Position.X or camera.CFrame.Position.X
+	return math.clamp(math.round(x / GameConfig.AreaSpacing) + 1, 1, #GameConfig.Areas)
+end
+
+-- Which Bebeh the HUD should track: the one where you are standing if he is
+-- still hungry, otherwise the earliest one that is not yet full.
+local function trackedAreaIndex(): number
+	local here = currentAreaIndex()
+	if here <= state.maxArea and state.fed[here] < GameConfig.Areas[here].HungerGoal then
+		return here
+	end
+	for i = 1, state.maxArea do
+		if state.fed[i] < GameConfig.Areas[i].HungerGoal then
+			return i
+		end
+	end
+	return state.maxArea
+end
+
+local function refreshPanel()
+	local here = currentAreaIndex()
+	areaTitle.Text = `{here}. {GameConfig.Areas[here].Name}`
+
+	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
+	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
+	carryFill.Size = UDim2.fromScale(carryRatio, 1)
+	carryFill.BackgroundColor3 = carryRatio >= 1 and Color3.fromRGB(255, 130, 110) or COOKIE_YELLOW
+
+	local tracked = trackedAreaIndex()
+	local cfg = GameConfig.Areas[tracked]
+	local fed = state.fed[tracked] or 0
+	hungerLabel.Text = `{cfg.BebehName}  {GameConfig.abbreviate(fed)} / {GameConfig.abbreviate(cfg.HungerGoal)}`
+	hungerFill.Size = UDim2.fromScale(math.clamp(fed / cfg.HungerGoal, 0, 1), 1)
+
+	if carryRatio >= 1 then
+		hintLabel.Text = "Hands full — go feed Big Bebeh!"
+	elseif fed >= cfg.HungerGoal then
+		hintLabel.Text = tracked < #GameConfig.Areas and "He's full! Head through the open gate →"
+			or "You fed BIG BEBEH everything. Legend."
+	else
+		hintLabel.Text = "Walk over cookies, then stand on the glowing pad to feed him."
+	end
+end
+
+-- Gates --------------------------------------------------------------------
+
+local function refreshGate(gate: BasePart)
+	local areaIndex = gate:GetAttribute("AreaIndex") :: number
+	if not areaIndex then
+		return
+	end
+	local unlocked = state.maxArea >= areaIndex
+	local cfg = GameConfig.Areas[areaIndex]
+
+	gate.CanCollide = not unlocked
+	gate.Transparency = unlocked and 1 or 0.35
+
+	local sign = gate:FindFirstChild("Sign") :: BillboardGui?
+	local label = sign and sign:FindFirstChild("Label") :: TextLabel?
+	if label and sign then
+		sign.Enabled = not unlocked
+		local prev = GameConfig.Areas[areaIndex - 1]
+		local remaining = math.max(0, prev.HungerGoal - (state.fed[areaIndex - 1] or 0))
+		label.Text = `🔒 {cfg.Name}\nFeed {prev.BebehName} {GameConfig.abbreviate(remaining)} more`
+	end
+end
+
+local function refreshAllGates()
+	for _, gate in CollectionService:GetTagged("AreaGate") do
+		if gate:IsA("BasePart") then
+			refreshGate(gate)
+		end
+	end
+end
+
+CollectionService:GetInstanceAddedSignal("AreaGate"):Connect(function(gate)
+	if gate:IsA("BasePart") then
+		refreshGate(gate)
+	end
+end)
+
+-- Bebeh nameplates ---------------------------------------------------------
+
+local function refreshBebeh(model: Model)
+	local areaIndex = model:GetAttribute("AreaIndex") :: number
+	if not areaIndex then
+		return
+	end
+	local cfg = GameConfig.Areas[areaIndex]
+	local billboard = model:FindFirstChild("BebehStatus", true) :: BillboardGui?
+	if not billboard then
+		return
+	end
+
+	local status = billboard:FindFirstChild("Status") :: TextLabel?
+	local barBack = billboard:FindFirstChild("BarBack")
+	local fill = barBack and barBack:FindFirstChild("BarFill") :: Frame?
+	if not status or not fill then
+		return
+	end
+
+	local fed = state.fed[areaIndex] or 0
+	local locked = state.maxArea < areaIndex
+
+	if locked then
+		status.Text = "🔒 Locked"
+		fill.Size = UDim2.fromScale(0, 1)
+	elseif fed >= cfg.HungerGoal then
+		status.Text = "😴 Full & happy"
+		fill.Size = UDim2.fromScale(1, 1)
+		fill.BackgroundColor3 = Color3.fromRGB(130, 240, 160)
+	else
+		status.Text = `{GameConfig.abbreviate(fed)} / {GameConfig.abbreviate(cfg.HungerGoal)} cookies`
+		fill.Size = UDim2.fromScale(math.clamp(fed / cfg.HungerGoal, 0, 1), 1)
+	end
+end
+
+local function refreshAllBebehs()
+	for _, model in CollectionService:GetTagged("BigBebeh") do
+		if model:IsA("Model") then
+			refreshBebeh(model)
+		end
+	end
+end
+
+CollectionService:GetInstanceAddedSignal("BigBebeh"):Connect(function(model)
+	if model:IsA("Model") then
+		refreshBebeh(model)
+	end
+end)
+
+-- Remote handlers ----------------------------------------------------------
+
+Remotes.SyncState.OnClientEvent:Connect(function(newState)
+	state = newState
+	refreshPanel()
+	refreshAllGates()
+	refreshAllBebehs()
+end)
+
+local toastOrder = 0
+Remotes.Toast.OnClientEvent:Connect(function(message: string, color: Color3)
+	toastOrder += 1
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 0, 34)
+	frame.BackgroundColor3 = PANEL_BG
+	frame.BackgroundTransparency = 0.2
+	frame.BorderSizePixel = 0
+	frame.LayoutOrder = toastOrder
+	frame.Parent = toastHolder
+	corner(frame, 10)
+
+	local label = newLabel({
+		Size = UDim2.new(1, -20, 1, -8),
+		Position = UDim2.new(0, 10, 0, 4),
+		Text = message,
+		TextColor3 = color,
+	})
+	label.Parent = frame
+
+	task.delay(3.5, function()
+		TweenService:Create(frame, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
+		task.wait(0.45)
+		frame:Destroy()
+	end)
+end)
+
+Remotes.CookiePop.OnClientEvent:Connect(function(position: Vector3, text: string, color: Color3)
+	local anchor = Instance.new("Attachment")
+	anchor.WorldPosition = position + Vector3.new(0, 2, 0)
+	anchor.Parent = workspace.Terrain
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromScale(6, 2)
+	billboard.AlwaysOnTop = true
+	billboard.Adornee = anchor
+	billboard.Parent = anchor
+
+	local label = newLabel({
+		Size = UDim2.fromScale(1, 1),
+		Font = Enum.Font.FredokaOne,
+		Text = text,
+		TextColor3 = color,
+		TextStrokeTransparency = 0.2,
+	})
+	label.Parent = billboard
+
+	local info = TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(anchor, info, { WorldPosition = anchor.WorldPosition + Vector3.new(0, 6, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	task.delay(0.8, function()
+		anchor:Destroy()
+	end)
+end)
+
+-- Bebeh idle motion, plus the squish when he eats.
+local bebehBase: { [Model]: CFrame } = {}
+local bebehBounce: { [Model]: number } = {}
+
+Remotes.FeedBurst.OnClientEvent:Connect(function(model: Model, amount: number)
+	if not model then
+		return
+	end
+	bebehBounce[model] = 1
+
+	local anchor = Instance.new("Attachment")
+	anchor.WorldPosition = model:GetPivot().Position
+	anchor.Parent = workspace.Terrain
+
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(COOKIE_YELLOW)
+	emitter.Size = NumberSequence.new(1.5)
+	emitter.Lifetime = NumberRange.new(0.4, 0.8)
+	emitter.Speed = NumberRange.new(8, 16)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Rate = 0
+	emitter.Parent = anchor
+	emitter:Emit(math.clamp(12 + amount // 4, 12, 60))
+
+	task.delay(1.2, function()
+		anchor:Destroy()
+	end)
+end)
+
+-- Per-frame world animation ------------------------------------------------
+
+local cookiesFolder = workspace:WaitForChild("BigBebehWorld"):WaitForChild("Cookies")
+local cookieBase: { [Model]: CFrame } = {}
+
+cookiesFolder.ChildRemoved:Connect(function(child)
+	cookieBase[child :: any] = nil
+end)
+
+RunService.RenderStepped:Connect(function()
+	local now = os.clock()
+	local eye = camera.CFrame.Position
+
+	for _, cookie in cookiesFolder:GetChildren() do
+		if not cookie:IsA("Model") or not cookie.PrimaryPart then
+			continue
+		end
+		local base = cookieBase[cookie]
+		if not base then
+			base = cookie:GetPivot()
+			cookieBase[cookie] = base
+		end
+		-- Skip anything the player cannot see anyway.
+		if (base.Position - eye).Magnitude > 180 then
+			continue
+		end
+		local bob = math.sin(now * 2.5 + base.Position.X * 0.35) * 0.35
+		cookie:PivotTo(base * CFrame.new(0, bob, 0) * CFrame.Angles(0, now * 1.8, 0))
+	end
+
+	for _, model in CollectionService:GetTagged("BigBebeh") do
+		if not model:IsA("Model") then
+			continue
+		end
+		local base = bebehBase[model]
+		if not base then
+			base = model:GetPivot()
+			bebehBase[model] = base
+		end
+		if (base.Position - eye).Magnitude > 260 then
+			continue
+		end
+
+		local bounce = bebehBounce[model] or 0
+		if bounce > 0 then
+			bounce = math.max(0, bounce - 2.5 / 60)
+			bebehBounce[model] = bounce
+		end
+
+		local breathe = math.sin(now * 1.4) * 0.6
+		local hop = math.abs(math.sin(now * 14)) * bounce * 2.5
+		local sway = math.sin(now * 0.8) * 0.03
+		model:PivotTo(base * CFrame.new(0, breathe + hop, 0) * CFrame.Angles(0, sway, 0))
+	end
+end)
+
+player.CharacterAdded:Connect(function()
+	task.wait(0.5)
+	refreshPanel()
+end)
+
+-- Tell the server we are ready, so we get the first state even if we loaded late.
+Remotes.SyncState:FireServer()
+
+task.spawn(function()
+	while true do
+		task.wait(0.25)
+		refreshPanel()
+	end
+end)
+]]></ProtectedString>
+</Properties>
+</Item>
+</Item>
+</Item>
+<Item class="Players" referent="RBX16">
+<Properties>
+<string name="Name">Players</string>
+</Properties>
+</Item>
+<Item class="SoundService" referent="RBX17">
+<Properties>
+<string name="Name">SoundService</string>
+</Properties>
+</Item>
+</roblox>
