@@ -28,6 +28,8 @@ GameConfig.VoidY = -60 -- fall below this and you get placed back on your area
 GameConfig.MagnetInterval = 0.15 -- seconds between magnet sweeps
 
 -- World layout -------------------------------------------------------------
+-- Default platform footprint. An area can override it with its own
+-- `PlatformSize`, which is how zone 1 stays a compact starter arena.
 GameConfig.PlatformSize = Vector3.new(220, 6, 220)
 GameConfig.AreaSpacing = 300 -- centre-to-centre distance along +X
 GameConfig.BridgeWidth = 26
@@ -39,11 +41,12 @@ GameConfig.BridgeWidth = 26
 GameConfig.Areas = {
 	{
 		Name = "Cookie Nursery",
+		PlatformSize = Vector3.new(130, 6, 130),
 		FloorColor = Color3.fromRGB(126, 196, 122),
 		AccentColor = Color3.fromRGB(255, 232, 120),
 		CookieColor = Color3.fromRGB(214, 168, 106),
 		CookieValue = 1,
-		CookieCount = 40,
+		CookieCount = 22,
 		CarryCapacity = 30,
 		HungerGoal = 60,
 		BebehName = "Baby Bebeh",
@@ -149,6 +152,120 @@ GameConfig.Upgrades = {
 	},
 }
 
+-- Runes --------------------------------------------------------------------
+-- Stand on the rune altar and it opens runes for you. Each open rolls down the
+-- ladder from rarest to commonest, so adding a new tier is one entry here.
+--
+-- `Odds = 7` means a 1 in 7 roll. Keep the list sorted commonest-first.
+--
+-- The two boost numbers are read exactly as written: holding ONE gives
+-- `FirstBoost`, and holding `MaxStack` of them gives `MaxBoost`. The curve
+-- between is solved from those two points (see getRuneBoost), so you can state
+-- a rune's power in the terms players actually see.
+GameConfig.RuneOpenInterval = 1.1 -- seconds per open while standing on the altar
+GameConfig.RuneAltarRadius = 15
+
+GameConfig.RuneEffectNames = {
+	CookieBoost = "Cookie Boost",
+	RuneLuck = "Rune Luck",
+	RuneBulk = "Rune Bulk",
+	RuneClone = "Rune Clone",
+}
+
+GameConfig.Runes = {
+	{
+		Id = "BasicCookie",
+		Name = "Basic Cookie",
+		Odds = 1,
+		Effect = "CookieBoost",
+		FirstBoost = 0.1,
+		MaxStack = 1000,
+		MaxBoost = 1.0,
+		Color = Color3.fromRGB(206, 206, 206),
+	},
+	{
+		Id = "RareCookie",
+		Name = "Rare Cookie",
+		Odds = 7,
+		Effect = "CookieBoost",
+		FirstBoost = 0.2,
+		MaxStack = 2500,
+		MaxBoost = 2.0,
+		Color = Color3.fromRGB(88, 198, 255),
+	},
+}
+
+function GameConfig.getRune(id: string)
+	for _, rune in GameConfig.Runes do
+		if rune.Id == id then
+			return rune
+		end
+	end
+	return nil
+end
+
+--[[
+	Boost from holding `count` of a rune.
+
+	Solves `boost = MaxBoost * (n / MaxStack) ^ p` for the p that makes
+	boost(1) = FirstBoost and boost(MaxStack) = MaxBoost, so both of the numbers
+	quoted in the config are hit exactly and everything between curves smoothly.
+]]
+function GameConfig.getRuneBoost(rune: any, count: number): number
+	if count <= 0 then
+		return 0
+	end
+	local capped = math.min(count, rune.MaxStack)
+	local p = math.log(rune.FirstBoost / rune.MaxBoost) / math.log(1 / rune.MaxStack)
+	return rune.MaxBoost * (capped / rune.MaxStack) ^ p
+end
+
+function GameConfig.getRuneCount(state: any, id: string): number
+	return (state.runes and state.runes[id]) or 0
+end
+
+-- Total of every rune contributing a given effect.
+function GameConfig.getRuneEffectTotal(state: any, effect: string): number
+	local total = 0
+	for _, rune in GameConfig.Runes do
+		if rune.Effect == effect then
+			total += GameConfig.getRuneBoost(rune, GameConfig.getRuneCount(state, rune.Id))
+		end
+	end
+	return total
+end
+
+function GameConfig.getCookieMultiplier(state: any): number
+	return 1 + GameConfig.getRuneEffectTotal(state, "CookieBoost")
+end
+
+function GameConfig.getRuneLuck(state: any): number
+	return 1 + GameConfig.getRuneEffectTotal(state, "RuneLuck")
+end
+
+function GameConfig.getRuneBulk(state: any): number
+	return math.max(1, math.floor(1 + GameConfig.getRuneEffectTotal(state, "RuneBulk")))
+end
+
+function GameConfig.getRuneCloneChance(state: any): number
+	return math.min(0.95, GameConfig.getRuneEffectTotal(state, "RuneClone"))
+end
+
+--[[
+	Rolls one rune. Walks the ladder rarest-first; the first tier that hits wins,
+	and the commonest tier is the floor so a roll always produces something.
+	`luck` divides the odds, so x2 luck turns 1/7 into 1/3.5.
+]]
+function GameConfig.rollRune(luck: number)
+	for i = #GameConfig.Runes, 2, -1 do
+		local rune = GameConfig.Runes[i]
+		if math.random() < math.min(1, luck / rune.Odds) then
+			return rune
+		end
+	end
+	return GameConfig.Runes[1]
+end
+
 -- Rebirth ------------------------------------------------------------------
 -- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
 -- upgrade and sprinkle, plus a permanent multiplier on everything you collect.
@@ -156,6 +273,16 @@ GameConfig.RebirthMultiplierPerLevel = 0.5
 GameConfig.RebirthSprinkleBonus = 2500
 
 -- Helpers ------------------------------------------------------------------
+
+function GameConfig.getPlatformSize(areaIndex: number): Vector3
+	return GameConfig.Areas[areaIndex].PlatformSize or GameConfig.PlatformSize
+end
+
+-- Where an area's platform ends along X. Bridges are built between these edges
+-- rather than assuming every platform is the same width.
+function GameConfig.getAreaEdge(areaIndex: number, side: number): number
+	return GameConfig.getAreaCenter(areaIndex).X + side * GameConfig.getPlatformSize(areaIndex).X / 2
+end
 
 function GameConfig.getAreaCenter(areaIndex: number): Vector3
 	return Vector3.new((areaIndex - 1) * GameConfig.AreaSpacing, 0, 0)

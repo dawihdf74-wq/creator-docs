@@ -44,17 +44,19 @@ local cookiesByArea: { [number]: { Model } } = {}
 -- Somewhere on the platform that is not on top of the Bebeh or his feed pad.
 local function randomCookiePosition(areaIndex: number): Vector3
 	local center = GameConfig.getAreaCenter(areaIndex)
-	local halfX = GameConfig.PlatformSize.X / 2 - 22
-	local halfZ = GameConfig.PlatformSize.Z / 2 - 22
+	local size = GameConfig.getPlatformSize(areaIndex)
+	local halfX = math.max(8, size.X / 2 - 20)
+	local halfZ = math.max(8, size.Z / 2 - 20)
+	-- Matches where WorldBuilder stands him, so cookies never spawn inside him.
+	local bebehZ = -(size.Z / 2 - 25)
 
 	for _ = 1, 12 do
 		local pos = center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(-halfZ, halfZ))
-		-- The Bebeh stands at z = -70 relative to the area centre.
-		if (pos - (center + Vector3.new(0, 0, -70))).Magnitude > GameConfig.FeedRadius + 22 then
+		if (pos - (center + Vector3.new(0, 0, bebehZ))).Magnitude > GameConfig.FeedRadius + 16 then
 			return pos
 		end
 	end
-	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(20, halfZ))
+	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(10, halfZ))
 end
 
 -- Import models/BigBebehCookie.fbx and name it "CookieModel" in ServerStorage
@@ -219,6 +221,8 @@ local function sync(player: Player)
 		sprinkles = state.sprinkles,
 		upgrades = state.upgrades,
 		rebirths = state.rebirths,
+		runes = state.runes,
+		runesOpened = state.runesOpened,
 	})
 end
 
@@ -266,7 +270,9 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 		return
 	end
 
-	local value = (model:GetAttribute("Value") :: number) * GameConfig.getRebirthMultiplier(state)
+	local value = (model:GetAttribute("Value") :: number)
+		* GameConfig.getRebirthMultiplier(state)
+		* GameConfig.getCookieMultiplier(state)
 	local lucky = math.random() < GameConfig.getLuckChance(state)
 	if lucky then
 		value *= 2
@@ -445,6 +451,57 @@ task.spawn(function()
 	end
 end)
 
+-- Runes --------------------------------------------------------------------
+
+local runeAltars: { BasePart } = {}
+for _, crystal in CollectionService:GetTagged("RuneCrystal") do
+	if crystal:IsA("BasePart") then
+		table.insert(runeAltars, crystal)
+	end
+end
+
+local function openRunes(player: Player, state: any)
+	local bulk = GameConfig.getRuneBulk(state)
+	local luck = GameConfig.getRuneLuck(state)
+	local cloneChance = GameConfig.getRuneCloneChance(state)
+
+	local drops: { { id: string, amount: number } } = {}
+	for _ = 1, bulk do
+		local rune = GameConfig.rollRune(luck)
+		-- Rune Clone occasionally doubles a single roll.
+		local amount = (math.random() < cloneChance) and 2 or 1
+		state.runes[rune.Id] = (state.runes[rune.Id] or 0) + amount
+		state.runesOpened += amount
+		table.insert(drops, { id = rune.Id, amount = amount })
+	end
+
+	Remotes.RuneDrop:FireClient(player, drops)
+	sync(player)
+end
+
+task.spawn(function()
+	while true do
+		task.wait(GameConfig.RuneOpenInterval)
+		if #runeAltars == 0 then
+			continue
+		end
+		for player, state in PlayerState.all() do
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if not root then
+				continue
+			end
+			for _, altar in runeAltars do
+				local offset = altar.Position - root.Position
+				if Vector2.new(offset.X, offset.Z).Magnitude <= GameConfig.RuneAltarRadius then
+					openRunes(player, state)
+					break
+				end
+			end
+		end
+	end
+end)
+
 -- Shop and rebirth ---------------------------------------------------------
 
 Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
@@ -493,6 +550,7 @@ Remotes.Rebirth.OnServerEvent:Connect(function(player)
 		state.fed[i] = 0
 	end
 	state.sprinkles += GameConfig.RebirthSprinkleBonus
+	-- Runes and upgrades survive a rebirth; only the areas reset.
 
 	teleportToArea(player, 1)
 	applyWalkSpeed(player, state)

@@ -10,6 +10,7 @@
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,6 +41,8 @@ local state = {
 	sprinkles = 0,
 	upgrades = {},
 	rebirths = 0,
+	runes = {},
+	runesOpened = 0,
 }
 
 -- UI helpers ---------------------------------------------------------------
@@ -79,16 +82,26 @@ end
 local gui = Instance.new("ScreenGui")
 gui.Name = "BigBebehHUD"
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
+-- Roblox draws its own chrome (logo, menu, chat) across the top-left. With
+-- IgnoreGuiInset on, our HUD was rendering underneath those buttons. Respect
+-- the inset, and additionally keep a clear strip on the left for the floating
+-- button cluster, whose height GetGuiInset does not always report.
+gui.IgnoreGuiInset = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
+
+local TOPBAR_CLEARANCE = 8
+local function topSafeY(extra: number): number
+	local inset = GuiService:GetGuiInset()
+	return inset.Y + TOPBAR_CLEARANCE + extra
+end
 
 -- HUD ----------------------------------------------------------------------
 
 local areaTitle = newLabel({
 	Name = "AreaTitle",
 	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 12),
+	Position = UDim2.new(0.5, 0, 0, topSafeY(0)),
 	Size = UDim2.new(0, 460, 0, 46),
 	Font = Enum.Font.FredokaOne,
 	Text = GameConfig.Areas[1].Name,
@@ -99,7 +112,7 @@ areaTitle.Parent = gui
 -- Sprinkle purse, top left.
 local purse = Instance.new("Frame")
 purse.Name = "Purse"
-purse.Position = UDim2.new(0, 14, 0, 14)
+purse.Position = UDim2.new(0, 14, 0, topSafeY(4))
 purse.Size = UDim2.new(0, 190, 0, 42)
 purse.BackgroundColor3 = PANEL_BG
 purse.BackgroundTransparency = 0.15
@@ -120,7 +133,7 @@ sprinkleLabel.Parent = purse
 
 local rebirthBadge = newLabel({
 	Name = "RebirthBadge",
-	Position = UDim2.new(0, 14, 0, 62),
+	Position = UDim2.new(0, 14, 0, topSafeY(52)),
 	Size = UDim2.new(0, 190, 0, 26),
 	Font = Enum.Font.GothamBold,
 	Text = "",
@@ -134,7 +147,7 @@ rebirthBadge.Parent = gui
 local toastHolder = Instance.new("Frame")
 toastHolder.Name = "Toasts"
 toastHolder.AnchorPoint = Vector2.new(0.5, 0)
-toastHolder.Position = UDim2.new(0.5, 0, 0, 64)
+toastHolder.Position = UDim2.new(0.5, 0, 0, topSafeY(52))
 toastHolder.Size = UDim2.new(0, 520, 0, 160)
 toastHolder.BackgroundTransparency = 1
 toastHolder.Parent = gui
@@ -409,6 +422,200 @@ local function refreshShop()
 	end
 end
 
+-- Runes --------------------------------------------------------------------
+
+local RUNE_PURPLE = Color3.fromRGB(178, 138, 255)
+
+local runesButton = newButton({
+	Name = "RunesButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -160, 1, -18),
+	Size = UDim2.new(0, 132, 0, 52),
+	BackgroundColor3 = Color3.fromRGB(126, 92, 214),
+	Text = "✦ RUNES",
+})
+runesButton.Parent = gui
+corner(runesButton, 14)
+
+local runeMenu = Instance.new("Frame")
+runeMenu.Name = "RuneMenu"
+runeMenu.AnchorPoint = Vector2.new(0.5, 0.5)
+runeMenu.Position = UDim2.new(0.5, 0, 0.5, 0)
+runeMenu.Size = UDim2.new(0, 640, 0, 520)
+runeMenu.BackgroundColor3 = PANEL_BG
+runeMenu.BorderSizePixel = 0
+runeMenu.Visible = false
+runeMenu.Parent = gui
+corner(runeMenu, 18)
+
+local runeTitle = newLabel({
+	Position = UDim2.new(0, 20, 0, 14),
+	Size = UDim2.new(1, -110, 0, 34),
+	Font = Enum.Font.FredokaOne,
+	Text = "✦ Cookie Runes",
+	TextColor3 = RUNE_PURPLE,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+runeTitle.Parent = runeMenu
+
+local runeSubtitle = newLabel({
+	Position = UDim2.new(0, 20, 0, 50),
+	Size = UDim2.new(1, -110, 0, 24),
+	Text = "0 opened",
+	TextColor3 = Color3.fromRGB(184, 180, 200),
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+runeSubtitle.Parent = runeMenu
+
+local runeClose = newButton({
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -14, 0, 14),
+	Size = UDim2.new(0, 40, 0, 40),
+	BackgroundColor3 = Color3.fromRGB(70, 66, 86),
+	Text = "✕",
+})
+runeClose.Parent = runeMenu
+corner(runeClose, 12)
+
+-- Left: the rune ladder. Right: what they add up to.
+local runeList = Instance.new("ScrollingFrame")
+runeList.Position = UDim2.new(0, 14, 0, 86)
+runeList.Size = UDim2.new(0, 384, 1, -100)
+runeList.BackgroundTransparency = 1
+runeList.BorderSizePixel = 0
+runeList.ScrollBarThickness = 5
+runeList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+runeList.CanvasSize = UDim2.new()
+runeList.Parent = runeMenu
+
+local runeLayout = Instance.new("UIListLayout")
+runeLayout.SortOrder = Enum.SortOrder.LayoutOrder
+runeLayout.Padding = UDim.new(0, 8)
+runeLayout.Parent = runeList
+
+local summary = Instance.new("Frame")
+summary.Position = UDim2.new(0, 408, 0, 86)
+summary.Size = UDim2.new(1, -422, 1, -100)
+summary.BackgroundColor3 = Color3.fromRGB(20, 18, 28)
+summary.BorderSizePixel = 0
+summary.Parent = runeMenu
+corner(summary, 14)
+
+local summaryTitle = newLabel({
+	Position = UDim2.new(0, 14, 0, 12),
+	Size = UDim2.new(1, -28, 0, 26),
+	Font = Enum.Font.FredokaOne,
+	Text = "Your Boosts",
+	TextColor3 = RUNE_PURPLE,
+})
+summaryTitle.Parent = summary
+
+local summaryBody = newLabel({
+	Position = UDim2.new(0, 14, 0, 46),
+	Size = UDim2.new(1, -28, 1, -60),
+	Font = Enum.Font.GothamBold,
+	Text = "",
+	TextColor3 = Color3.fromRGB(240, 238, 248),
+	TextScaled = false,
+	TextSize = 17,
+	TextWrapped = true,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextYAlignment = Enum.TextYAlignment.Top,
+})
+summaryBody.Parent = summary
+
+-- One row per rune tier, built once and refreshed on sync.
+local runeRows: { [string]: { count: TextLabel, boost: TextLabel } } = {}
+
+for index, rune in GameConfig.Runes do
+	local row = Instance.new("Frame")
+	row.Name = rune.Id
+	row.Size = UDim2.new(1, -6, 0, 66)
+	row.BackgroundColor3 = Color3.fromRGB(42, 40, 56)
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index
+	row.Parent = runeList
+	corner(row, 12)
+
+	local swatch = Instance.new("Frame")
+	swatch.Size = UDim2.new(0, 6, 1, -16)
+	swatch.Position = UDim2.new(0, 10, 0, 8)
+	swatch.BackgroundColor3 = rune.Color
+	swatch.BorderSizePixel = 0
+	swatch.Parent = row
+	corner(swatch, 3)
+
+	local nameLabel = newLabel({
+		Position = UDim2.new(0, 26, 0, 8),
+		Size = UDim2.new(1, -160, 0, 24),
+		Font = Enum.Font.FredokaOne,
+		Text = `{rune.Name}  [1/{rune.Odds}]`,
+		TextColor3 = rune.Color,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	nameLabel.Parent = row
+
+	local boostLabel = newLabel({
+		Position = UDim2.new(0, 26, 0, 34),
+		Size = UDim2.new(1, -160, 0, 22),
+		Font = Enum.Font.Gotham,
+		Text = "",
+		TextColor3 = Color3.fromRGB(186, 182, 202),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	boostLabel.Parent = row
+
+	local countLabel = newLabel({
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, 0),
+		Size = UDim2.new(0, 130, 0, 40),
+		Font = Enum.Font.FredokaOne,
+		Text = "x0",
+		TextColor3 = Color3.fromRGB(255, 255, 255),
+		TextXAlignment = Enum.TextXAlignment.Right,
+	})
+	countLabel.Parent = row
+
+	runeRows[rune.Id] = { count = countLabel, boost = boostLabel }
+end
+
+local function refreshRunes()
+	runeSubtitle.Text = `{GameConfig.abbreviate(state.runesOpened or 0)} opened`
+
+	for _, rune in GameConfig.Runes do
+		local row = runeRows[rune.Id]
+		local count = GameConfig.getRuneCount(state, rune.Id)
+		local boost = GameConfig.getRuneBoost(rune, count)
+		local effect = GameConfig.RuneEffectNames[rune.Effect] or rune.Effect
+
+		row.count.Text = `x{GameConfig.abbreviate(count)}`
+		row.count.TextColor3 = count > 0 and Color3.fromRGB(255, 255, 255) or DENY_GREY
+		if count >= rune.MaxStack then
+			row.boost.Text = `MAXED · +x{string.format("%.2f", boost)} {effect}`
+		else
+			row.boost.Text = `+x{string.format("%.2f", boost)} {effect}  ({GameConfig.abbreviate(count)}/{GameConfig.abbreviate(rune.MaxStack)})`
+		end
+	end
+
+	summaryBody.Text = table.concat({
+		`🍪 Cookies\n   x{string.format("%.2f", GameConfig.getCookieMultiplier(state))}`,
+		`✦ Rune Luck\n   x{string.format("%.2f", GameConfig.getRuneLuck(state))}`,
+		`⛏ Rune Bulk\n   {GameConfig.getRuneBulk(state)} per open`,
+		`❖ Rune Clone\n   {math.floor(GameConfig.getRuneCloneChance(state) * 100)}%`,
+		`\n⭐ Rebirth\n   x{GameConfig.getRebirthMultiplier(state)}`,
+	}, "\n\n")
+end
+
+runesButton.Activated:Connect(function()
+	runeMenu.Visible = not runeMenu.Visible
+	if runeMenu.Visible then
+		refreshRunes()
+	end
+end)
+runeClose.Activated:Connect(function()
+	runeMenu.Visible = false
+end)
+
 -- HUD updates --------------------------------------------------------------
 
 local function currentAreaIndex(): number
@@ -463,6 +670,154 @@ local function refreshPanel()
 		hintLabel.Text = "Walk over cookies, then stand on the glowing pad to feed him."
 	end
 end
+
+-- Upgrade board -------------------------------------------------------------
+
+--[[
+	The board in the world shows the same upgrades as the shop panel. It is drawn
+	client-side onto a SurfaceGui because levels and prices are per-player -- two
+	players standing at the same board must see their own numbers.
+
+	SurfaceGui buttons only receive clicks when the SurfaceGui lives in PlayerGui
+	with Adornee pointing at the part, which is why it is built here rather than
+	by the server.
+]]
+local boardRows: { { level: TextLabel, cost: TextLabel, button: TextButton } } = {}
+
+local function buildBoard(face: BasePart)
+	local surface = Instance.new("SurfaceGui")
+	surface.Name = "UpgradeBoardGui"
+	surface.Adornee = face
+	surface.Face = Enum.NormalId.Front
+	surface.CanvasSize = Vector2.new(920, 400)
+	surface.LightInfluence = 0
+	surface.MaxDistance = 160
+	surface.Parent = playerGui
+
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1)
+	bg.BackgroundColor3 = Color3.fromRGB(26, 23, 36)
+	bg.BorderSizePixel = 0
+	bg.Parent = surface
+
+	local title = newLabel({
+		Position = UDim2.new(0, 20, 0, 10),
+		Size = UDim2.new(1, -40, 0, 52),
+		Font = Enum.Font.FredokaOne,
+		Text = "🍪 COOKIE UPGRADES",
+		TextColor3 = COOKIE_YELLOW,
+	})
+	title.Parent = bg
+
+	local grid = Instance.new("Frame")
+	grid.Position = UDim2.new(0, 16, 0, 70)
+	grid.Size = UDim2.new(1, -32, 1, -86)
+	grid.BackgroundTransparency = 1
+	grid.Parent = bg
+
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.Padding = UDim.new(0, 12)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = grid
+
+	for index, upgrade in GameConfig.Upgrades do
+		local card = Instance.new("Frame")
+		card.Size = UDim2.new(1 / #GameConfig.Upgrades, -12, 1, 0)
+		card.BackgroundColor3 = Color3.fromRGB(44, 40, 60)
+		card.BorderSizePixel = 0
+		card.LayoutOrder = index
+		card.Parent = grid
+		corner(card, 12)
+
+		local icon = newLabel({
+			Position = UDim2.new(0, 8, 0, 8),
+			Size = UDim2.new(1, -16, 0, 54),
+			Font = Enum.Font.FredokaOne,
+			Text = upgrade.Icon,
+		})
+		icon.Parent = card
+
+		local name = newLabel({
+			Position = UDim2.new(0, 8, 0, 62),
+			Size = UDim2.new(1, -16, 0, 34),
+			Font = Enum.Font.FredokaOne,
+			Text = upgrade.Name,
+			TextColor3 = COOKIE_YELLOW,
+		})
+		name.Parent = card
+
+		local level = newLabel({
+			Position = UDim2.new(0, 8, 0, 96),
+			Size = UDim2.new(1, -16, 0, 28),
+			Font = Enum.Font.Gotham,
+			Text = "Level 0",
+			TextColor3 = Color3.fromRGB(190, 186, 205),
+		})
+		level.Parent = card
+
+		local cost = newLabel({
+			Position = UDim2.new(0, 8, 0, 124),
+			Size = UDim2.new(1, -16, 0, 28),
+			Text = "",
+			TextColor3 = Color3.fromRGB(220, 216, 235),
+		})
+		cost.Parent = card
+
+		local buy = newButton({
+			AnchorPoint = Vector2.new(0.5, 1),
+			Position = UDim2.new(0.5, 0, 1, -10),
+			Size = UDim2.new(1, -20, 0, 60),
+			BackgroundColor3 = AFFORD_GREEN,
+			Text = "BUY",
+		})
+		buy.Parent = card
+		corner(buy, 10)
+		buy.Activated:Connect(function()
+			Remotes.BuyUpgrade:FireServer(upgrade.Id)
+		end)
+
+		table.insert(boardRows, { level = level, cost = cost, button = buy })
+	end
+end
+
+local function refreshBoard()
+	for index, upgrade in GameConfig.Upgrades do
+		local row = boardRows[index]
+		if not row then
+			continue
+		end
+		local owned = GameConfig.getUpgradeLevel(state, upgrade.Id)
+		row.level.Text = `Level {owned}/{upgrade.MaxLevel}`
+		if owned >= upgrade.MaxLevel then
+			row.cost.Text = GameConfig.describeUpgrade(state, upgrade)
+			row.button.Text = "MAX"
+			row.button.BackgroundColor3 = DENY_GREY
+		else
+			local price = GameConfig.getUpgradeCost(upgrade, owned)
+			row.cost.Text = GameConfig.describeUpgrade(state, upgrade)
+			row.button.Text = `✨ {GameConfig.abbreviate(price)}`
+			row.button.BackgroundColor3 = state.sprinkles >= price and AFFORD_GREEN or DENY_GREY
+		end
+	end
+end
+
+-- Only one board is wired up: they all show the same thing, and a SurfaceGui
+-- per area would multiply the click targets for no benefit.
+local boardBuilt = false
+local function tryBuildBoard(face: Instance)
+	if boardBuilt or not face:IsA("BasePart") then
+		return
+	end
+	boardBuilt = true
+	buildBoard(face)
+	refreshBoard()
+end
+
+for _, face in CollectionService:GetTagged("UpgradeBoard") do
+	tryBuildBoard(face)
+end
+CollectionService:GetInstanceAddedSignal("UpgradeBoard"):Connect(tryBuildBoard)
 
 -- Gates --------------------------------------------------------------------
 
@@ -557,12 +912,14 @@ Remotes.SyncState.OnClientEvent:Connect(function(newState)
 	state = newState
 	refreshPanel()
 	refreshShop()
+	refreshRunes()
+	refreshBoard()
 	refreshAllGates()
 	refreshAllBebehs()
 end)
 
 local toastOrder = 0
-Remotes.Toast.OnClientEvent:Connect(function(message: string, color: Color3)
+local function showToast(message: string, color: Color3)
 	toastOrder += 1
 
 	local frame = Instance.new("Frame")
@@ -588,9 +945,13 @@ Remotes.Toast.OnClientEvent:Connect(function(message: string, color: Color3)
 		task.wait(0.45)
 		frame:Destroy()
 	end)
-end)
+end
 
-Remotes.CookiePop.OnClientEvent:Connect(function(position: Vector3, text: string, color: Color3)
+Remotes.Toast.OnClientEvent:Connect(showToast)
+
+-- A world-space label that rises and fades. Used for cookie pickups, sprinkle
+-- payouts and rune drops.
+local function floatText(position: Vector3, text: string, color: Color3)
 	local anchor = Instance.new("Attachment")
 	anchor.WorldPosition = position + Vector3.new(0, 2, 0)
 	anchor.Parent = workspace.Terrain
@@ -616,9 +977,12 @@ Remotes.CookiePop.OnClientEvent:Connect(function(position: Vector3, text: string
 	task.delay(0.8, function()
 		anchor:Destroy()
 	end)
-end)
+end
+
+Remotes.CookiePop.OnClientEvent:Connect(floatText)
 
 -- Bebeh idle motion, plus the squish when he eats.
+local crystalBase: { [BasePart]: Vector3 } = {}
 local bebehBase: { [Model]: CFrame } = {}
 local bebehBounce: { [Model]: number } = {}
 
@@ -646,6 +1010,32 @@ Remotes.FeedBurst.OnClientEvent:Connect(function(model: Model, amount: number)
 	task.delay(1.2, function()
 		anchor:Destroy()
 	end)
+end)
+
+Remotes.RuneDrop.OnClientEvent:Connect(function(drops)
+	if type(drops) ~= "table" then
+		return
+	end
+	-- Only announce the rarest thing in the batch; bulk opens would spam.
+	local best, bestOdds = nil, 0
+	for _, drop in drops do
+		local rune = GameConfig.getRune(drop.id)
+		if rune and rune.Odds > bestOdds then
+			best, bestOdds = rune, rune.Odds
+		end
+	end
+	if not best or best.Odds <= 1 then
+		return
+	end
+
+	showToast(`✦ {best.Name} [1/{best.Odds}]`, best.Color)
+
+	-- Float the name off the player too, so it reads as a drop, not a notice.
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root then
+		floatText(root.Position + Vector3.new(0, 4, 0), best.Name, best.Color)
+	end
 end)
 
 -- Per-frame world animation ------------------------------------------------
@@ -676,6 +1066,18 @@ RunService.RenderStepped:Connect(function()
 		end
 		local bob = math.sin(now * 2.5 + base.Position.X * 0.35) * 0.35
 		cookie:PivotTo(base * CFrame.new(0, bob, 0) * CFrame.Angles(0, now * 1.8, 0))
+	end
+
+	for _, crystal in CollectionService:GetTagged("RuneCrystal") do
+		if crystal:IsA("BasePart") then
+			local base = crystalBase[crystal]
+			if not base then
+				base = crystal.Position
+				crystalBase[crystal] = base
+			end
+			crystal.CFrame = CFrame.new(base + Vector3.new(0, math.sin(now * 1.6) * 0.8, 0))
+				* CFrame.Angles(0, now * 0.9, math.rad(20))
+		end
 	end
 
 	for _, model in CollectionService:GetTagged("BigBebeh") do

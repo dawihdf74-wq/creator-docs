@@ -56,12 +56,13 @@ local function makeSign(text: string, size: UDim2, adornee: BasePart, offsetY: n
 end
 
 -- A little market stall where Sprinkles get spent.
-local function buildShop(center: Vector3, cfg: any, parent: Instance)
+local function buildShop(areaIndex: number, center: Vector3, cfg: any, parent: Instance)
 	local folder = Instance.new("Folder")
 	folder.Name = "Shop"
 	folder.Parent = parent
 
-	local base = center + Vector3.new(62, 0, 62)
+	local half = GameConfig.getPlatformSize(areaIndex).X / 2
+	local base = center + Vector3.new(half - 26, 0, half - 26)
 
 	makeAnchoredPart("Counter", Vector3.new(16, 6, 6), CFrame.new(base + Vector3.new(0, 3, 0)), Color3.fromRGB(168, 128, 92), folder).Material =
 		Enum.Material.WoodPlanks
@@ -110,11 +111,124 @@ local function buildShop(center: Vector3, cfg: any, parent: Instance)
 	return folder
 end
 
+--[[
+	A wall-mounted upgrade board at the back of the arena. The panels themselves
+	are drawn by the client onto a SurfaceGui, because prices and levels are
+	per-player; the server only puts up the woodwork.
+]]
+local function buildUpgradeBoard(center: Vector3, size: Vector3, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "UpgradeBoard"
+	folder.Parent = parent
+
+	local z = -(size.Z / 2 - 6)
+	local boardWidth, boardHeight = 46, 20
+
+	for _, side in { -1, 1 } do
+		makeAnchoredPart(
+			"BoardLeg",
+			Vector3.new(1.6, 12, 1.6),
+			CFrame.new(center + Vector3.new(side * (boardWidth / 2 - 2), 6, z)),
+			Color3.fromRGB(96, 74, 58),
+			folder
+		)
+	end
+
+	makeAnchoredPart(
+		"BoardFrame",
+		Vector3.new(boardWidth + 2.4, boardHeight + 2.4, 1.6),
+		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z)),
+		Color3.fromRGB(64, 52, 74),
+		folder
+	)
+
+	local face = makeAnchoredPart(
+		"BoardFace",
+		Vector3.new(boardWidth, boardHeight, 1),
+		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z - 0.6)),
+		Color3.fromRGB(30, 27, 40),
+		folder
+	)
+	face.Material = Enum.Material.SmoothPlastic
+	CollectionService:AddTag(face, "UpgradeBoard")
+
+	local header = makeAnchoredPart(
+		"BoardHeader",
+		Vector3.new(1, 1, 1),
+		CFrame.new(center + Vector3.new(0, 12 + boardHeight + 4, z)),
+		cfg.AccentColor,
+		folder
+	)
+	header.Transparency = 1
+	header.CanCollide = false
+	makeSign("COOKIE UPGRADES", UDim2.fromScale(22, 4), header, 0)
+
+	return folder
+end
+
+--[[
+	The rune altar. Stand on it and runes open by themselves; the server watches
+	the radius, so there is nothing to press.
+]]
+local function buildRuneAltar(center: Vector3, size: Vector3, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "RuneAltar"
+	folder.Parent = parent
+
+	local base = center + Vector3.new(-(size.X / 2 - 26), 0, size.Z / 2 - 26)
+
+	local pad = makeAnchoredPart(
+		"AltarPad",
+		Vector3.new(1.2, GameConfig.RuneAltarRadius * 2, GameConfig.RuneAltarRadius * 2),
+		CFrame.new(base + Vector3.new(0, 0.3, 0)) * CFrame.Angles(0, 0, math.rad(90)),
+		Color3.fromRGB(150, 110, 240),
+		folder
+	)
+	pad.Shape = Enum.PartType.Cylinder
+	pad.CanCollide = false
+	pad.CanTouch = false
+	pad.Material = Enum.Material.Neon
+	pad.Transparency = 0.45
+
+	makeAnchoredPart(
+		"AltarPlinth",
+		Vector3.new(7, 3.4, 7),
+		CFrame.new(base + Vector3.new(0, 1.7, 0)),
+		Color3.fromRGB(62, 48, 88),
+		folder
+	)
+
+	-- A floating crystal to mark the spot.
+	local crystal = makeAnchoredPart(
+		"AltarCrystal",
+		Vector3.new(3.6, 6.4, 3.6),
+		CFrame.new(base + Vector3.new(0, 9, 0)) * CFrame.Angles(0, 0, math.rad(45)),
+		Color3.fromRGB(178, 138, 255),
+		folder
+	)
+	crystal.Material = Enum.Material.Neon
+	crystal.CanCollide = false
+	CollectionService:AddTag(crystal, "RuneCrystal")
+
+	local sign = makeAnchoredPart(
+		"AltarSign",
+		Vector3.new(1, 1, 1),
+		CFrame.new(base + Vector3.new(0, 16, 0)),
+		cfg.AccentColor,
+		folder
+	)
+	sign.Transparency = 1
+	sign.CanCollide = false
+	makeSign("✦ RUNE ALTAR ✦\nstand here to open", UDim2.fromScale(18, 5), sign, 0)
+
+	return folder
+end
+
 -- One platform, its fence, its name sign and its Bebeh.
 local function buildArea(areaIndex: number, parent: Instance)
 	local cfg = GameConfig.Areas[areaIndex]
 	local center = GameConfig.getAreaCenter(areaIndex)
-	local size = GameConfig.PlatformSize
+	local size = GameConfig.getPlatformSize(areaIndex)
 
 	local folder = Instance.new("Folder")
 	folder.Name = `Area{areaIndex}_{cfg.Name}`
@@ -193,7 +307,7 @@ local function buildArea(areaIndex: number, parent: Instance)
 	makeSign(`{areaIndex}. {cfg.Name}`, UDim2.fromScale(24, 5), marker, 0)
 
 	-- Big Bebeh, at the back of the platform, facing the middle.
-	local bebehPos = center + Vector3.new(0, 0, -70)
+	local bebehPos = center + Vector3.new(0, 0, -(size.Z / 2 - 25))
 	local bebeh = BebehBuilder.build(areaIndex, cfg, CFrame.lookAt(bebehPos, bebehPos + Vector3.new(0, 0, 1)))
 	bebeh.Parent = folder
 
@@ -212,7 +326,9 @@ local function buildArea(areaIndex: number, parent: Instance)
 	pad.Material = Enum.Material.Neon
 	pad.Transparency = 0.6
 
-	buildShop(center, cfg, folder)
+	buildShop(areaIndex, center, cfg, folder)
+	buildUpgradeBoard(center, size, cfg, folder)
+	buildRuneAltar(center, size, cfg, folder)
 
 	return { folder = folder, bebeh = bebeh, center = center }
 end
@@ -221,14 +337,15 @@ end
 local function buildBridge(areaIndex: number, parent: Instance)
 	local fromCenter = GameConfig.getAreaCenter(areaIndex)
 	local nextCfg = GameConfig.Areas[areaIndex + 1]
-	local size = GameConfig.PlatformSize
-	local gapLength = GameConfig.AreaSpacing - size.X
+	local gapStart = GameConfig.getAreaEdge(areaIndex, 1)
+	local gapEnd = GameConfig.getAreaEdge(areaIndex + 1, -1)
+	local gapLength = gapEnd - gapStart
 
 	local folder = Instance.new("Folder")
 	folder.Name = `Bridge{areaIndex}to{areaIndex + 1}`
 	folder.Parent = parent
 
-	local bridgeCenter = fromCenter + Vector3.new(size.X / 2 + gapLength / 2, -1.5, 0)
+	local bridgeCenter = Vector3.new((gapStart + gapEnd) / 2, -1.5, fromCenter.Z)
 	makeAnchoredPart(
 		"Deck",
 		Vector3.new(gapLength, 3, GameConfig.BridgeWidth),
@@ -252,7 +369,7 @@ local function buildBridge(areaIndex: number, parent: Instance)
 	local gate = makeAnchoredPart(
 		"Gate",
 		Vector3.new(2, 24, GameConfig.BridgeWidth + 3),
-		CFrame.new(fromCenter + Vector3.new(size.X / 2 + 3, 12, 0)),
+		CFrame.new(Vector3.new(gapStart + 3, 12, fromCenter.Z)),
 		nextCfg.AccentColor,
 		folder
 	)

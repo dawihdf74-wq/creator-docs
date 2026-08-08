@@ -10,6 +10,8 @@
 		sprinkles = 340,        -- upgrade currency, earned by feeding
 		upgrades  = { Capacity = 3, Speed = 1 },
 		rebirths  = 0,
+		runes     = { BasicCookie = 412, RareCookie = 8 },
+		runesOpened = 420,
 	}
 ]]
 
@@ -39,6 +41,10 @@ local function defaultState()
 	for _, upgrade in GameConfig.Upgrades do
 		upgrades[upgrade.Id] = 0
 	end
+	local runes = {}
+	for _, rune in GameConfig.Runes do
+		runes[rune.Id] = 0
+	end
 	return {
 		maxArea = 1,
 		carried = 0,
@@ -47,6 +53,8 @@ local function defaultState()
 		sprinkles = 0,
 		upgrades = upgrades,
 		rebirths = 0,
+		runes = runes,
+		runesOpened = 0,
 	}
 end
 
@@ -76,6 +84,19 @@ local function sanitize(raw: any)
 				state.upgrades[upgrade.Id] = math.min(math.floor(level), upgrade.MaxLevel)
 			end
 		end
+	end
+
+	-- Runes are read before capacity too: a rune could grant carry space later.
+	if type(raw.runes) == "table" then
+		for _, rune in GameConfig.Runes do
+			local owned = raw.runes[rune.Id]
+			if type(owned) == "number" and owned >= 0 then
+				state.runes[rune.Id] = math.floor(owned)
+			end
+		end
+	end
+	if type(raw.runesOpened) == "number" and raw.runesOpened >= 0 then
+		state.runesOpened = math.floor(raw.runesOpened)
 	end
 
 	if type(raw.carried) == "number" and raw.carried >= 0 then

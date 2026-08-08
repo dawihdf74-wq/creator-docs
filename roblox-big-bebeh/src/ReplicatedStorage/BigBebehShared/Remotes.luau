@@ -15,6 +15,7 @@ local REMOTE_NAMES = {
 	"FeedBurst", -- server -> client: make a Bebeh bounce and spit crumbs
 	"BuyUpgrade", -- client -> server: "I want the next level of this upgrade"
 	"Rebirth", -- client -> server: "start me over for the multiplier"
+	"RuneDrop", -- server -> client: a rune just landed, show it
 }
 
 local folder: Folder

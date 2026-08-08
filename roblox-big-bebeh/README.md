@@ -13,16 +13,21 @@ into an empty place, press Play, and it works.
 2. **Fill up** — your hands only hold so many. The bar at the bottom shows how full you are.
 3. **Feed** — stand on the glowing pad in front of Big Bebeh and he eats everything you carry, paying out **Sprinkles** ✨ as he goes.
 4. **Unlock** — fill his hunger bar and the gate behind him opens *for you*, revealing the next area with better cookies and a bigger carrying capacity.
-5. **Upgrade** — spend Sprinkles at the market stall on each platform (or the 🛒 button).
-6. **Rebirth** — once BIG BEBEH is full, start over with a permanent multiplier.
+5. **Upgrade** — spend Sprinkles at the upgrade board or the market stall.
+6. **Open runes** — stand on the rune altar for permanent cookie multipliers.
+7. **Rebirth** — once BIG BEBEH is full, start over with a permanent multiplier.
 
 | # | Area | Cookie value | Carry capacity | To feed the Bebeh |
 |---|------|-------------:|---------------:|------------------:|
-| 1 | Cookie Nursery | 1 | 30 | 60 |
+| 1 | Cookie Nursery* | 1 | 30 | 60 |
 | 2 | Sugar Sandbox | 4 | 120 | 400 |
 | 3 | Frosting Fields | 15 | 450 | 1,800 |
 | 4 | Choco Chip Canyon | 60 | 1,800 | 9,000 |
 | 5 | Golden Crumb Summit | 250 | 7,500 | 45,000 |
+
+\* Zone 1 is a compact 130x130 starter arena rather than the 220x220 the other
+zones use. Any area can override `PlatformSize`; bridges are built between real
+platform edges, so mixing sizes needs no other change.
 
 ## Upgrades
 
@@ -39,6 +44,42 @@ One complete run through all five areas earns about **56K** sprinkles, and maxin
 everything costs about **236K** — so it takes roughly four rebirths to finish the
 tree. That gap is deliberate: the first upgrade is affordable from area 1 alone,
 but no single run can buy out the shop, which is what gives rebirth a point.
+
+## Runes
+
+Zone 1 has a **rune altar**. Stand on the glowing pad and it opens runes by
+itself — no button, no cost beyond the time you are not out collecting. The
+`✦ RUNES` button opens a menu showing the ladder, how many of each you hold and
+what they are worth.
+
+| Rune | Odds | One gives | Maxed at | Maxed gives |
+|---|---|---|---:|---|
+| Basic Cookie | 1/1 | +x0.1 cookies | 1,000 | +x1 cookies |
+| Rare Cookie | 1/7 | +x0.2 cookies | 2,500 | +x2 cookies |
+
+Holding both maxed puts you at **x4 cookies**, stacking on top of the rebirth
+multiplier.
+
+The two boost numbers are read exactly as written. A rune declares what ONE is
+worth and what a full stack is worth, and `getRuneBoost` solves the curve
+between them, so the config reads in the same terms players see. Nothing has to
+be hand-tuned when you add a tier — state the two numbers and it fits itself.
+
+Runes also carry effect types the ladder does not use yet — **Rune Luck** (better
+odds), **Rune Bulk** (more opens at once) and **Rune Clone** (chance of a double
+drop). The plumbing is live, so a future tier only needs an `Effect` field:
+
+```lua
+{
+    Id = "SkilledCookie", Name = "Skilled Cookie", Odds = 120,
+    Effect = "RuneLuck", FirstBoost = 0.05, MaxStack = 500, MaxBoost = 0.5,
+    Color = Color3.fromRGB(120, 255, 170),
+}
+```
+
+Keep `GameConfig.Runes` sorted commonest-first — `rollRune` walks it
+rarest-to-commonest and the first tier that hits wins, with the 1/1 tier as the
+floor so a roll always yields something.
 
 ## Rebirth
 
