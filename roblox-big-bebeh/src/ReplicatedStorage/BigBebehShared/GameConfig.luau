@@ -41,12 +41,19 @@ GameConfig.BridgeWidth = 26
 GameConfig.Areas = {
 	{
 		Name = "Cookie Nursery",
-		PlatformSize = Vector3.new(130, 6, 130),
+		PlatformSize = Vector3.new(190, 6, 190),
+		-- Cookies spawn only inside this pit, so the rest of the map is walkable
+		-- space for the board, the altar and the Bebeh.
+		CookiePit = { Center = Vector3.new(0, 0, 18), Size = Vector3.new(76, 76) },
+		BoardOffset = Vector3.new(0, 0, -34), -- board sits on the pit's back edge
+		BebehOffset = Vector3.new(0, 0, -74),
+		AltarOffset = Vector3.new(-62, 0, 62),
+		ShopOffset = Vector3.new(62, 0, 62),
 		FloorColor = Color3.fromRGB(126, 196, 122),
 		AccentColor = Color3.fromRGB(255, 232, 120),
 		CookieColor = Color3.fromRGB(214, 168, 106),
 		CookieValue = 1,
-		CookieCount = 22,
+		CookieCount = 26,
 		CarryCapacity = 30,
 		HungerGoal = 60,
 		BebehName = "Baby Bebeh",
@@ -172,9 +179,22 @@ GameConfig.RuneEffectNames = {
 	RuneClone = "Rune Clone",
 }
 
+-- Rune families. The menu shows one family at a time and lets you pick between
+-- them, so a second family is one entry here plus runes tagged with its Id.
+GameConfig.RuneTypes = {
+	{
+		Id = "Cookie",
+		Name = "Cookie Rune",
+		Icon = "🍪",
+		Color = Color3.fromRGB(255, 190, 84),
+		Blurb = "Opened at the Cookie Altar in the Nursery.",
+	},
+}
+
 GameConfig.Runes = {
 	{
 		Id = "BasicCookie",
+		Type = "Cookie",
 		Name = "Basic Cookie",
 		Odds = 1,
 		Effect = "CookieBoost",
@@ -185,6 +205,7 @@ GameConfig.Runes = {
 	},
 	{
 		Id = "RareCookie",
+		Type = "Cookie",
 		Name = "Rare Cookie",
 		Odds = 7,
 		Effect = "CookieBoost",
@@ -194,6 +215,26 @@ GameConfig.Runes = {
 		Color = Color3.fromRGB(88, 198, 255),
 	},
 }
+
+function GameConfig.getRuneType(id: string)
+	for _, runeType in GameConfig.RuneTypes do
+		if runeType.Id == id then
+			return runeType
+		end
+	end
+	return nil
+end
+
+-- Every rune in a family, still in commonest-first order.
+function GameConfig.getRunesOfType(typeId: string)
+	local list = {}
+	for _, rune in GameConfig.Runes do
+		if rune.Type == typeId then
+			table.insert(list, rune)
+		end
+	end
+	return list
+end
 
 function GameConfig.getRune(id: string)
 	for _, rune in GameConfig.Runes do
@@ -273,6 +314,39 @@ GameConfig.RebirthMultiplierPerLevel = 0.5
 GameConfig.RebirthSprinkleBonus = 2500
 
 -- Helpers ------------------------------------------------------------------
+
+--[[
+	Where cookies are allowed to spawn in an area, as a centre and an XZ size.
+	An area without a `CookiePit` falls back to most of its platform, which is
+	what every zone past the first still does.
+]]
+function GameConfig.getCookiePit(areaIndex: number)
+	local area = GameConfig.Areas[areaIndex]
+	local center = GameConfig.getAreaCenter(areaIndex)
+	if area.CookiePit then
+		return center + area.CookiePit.Center, area.CookiePit.Size
+	end
+	local size = GameConfig.getPlatformSize(areaIndex)
+	return center, Vector2.new(size.X - 40, size.Z - 40)
+end
+
+-- Fixed landmarks. Areas can place these themselves; otherwise they are
+-- positioned relative to the platform's own size.
+function GameConfig.getLandmark(areaIndex: number, key: string): Vector3
+	local area = GameConfig.Areas[areaIndex]
+	local center = GameConfig.getAreaCenter(areaIndex)
+	if area[key] then
+		return center + area[key]
+	end
+	local size = GameConfig.getPlatformSize(areaIndex)
+	local defaults = {
+		BebehOffset = Vector3.new(0, 0, -(size.Z / 2 - 25)),
+		AltarOffset = Vector3.new(-(size.X / 2 - 26), 0, size.Z / 2 - 26),
+		ShopOffset = Vector3.new(size.X / 2 - 26, 0, size.Z / 2 - 26),
+		BoardOffset = Vector3.new(0, 0, -(size.Z / 2 - 6)),
+	}
+	return center + (defaults[key] or Vector3.new())
+end
 
 function GameConfig.getPlatformSize(areaIndex: number): Vector3
 	return GameConfig.Areas[areaIndex].PlatformSize or GameConfig.PlatformSize

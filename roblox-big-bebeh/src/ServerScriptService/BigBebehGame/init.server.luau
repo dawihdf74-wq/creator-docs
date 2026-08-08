@@ -43,20 +43,19 @@ local cookiesByArea: { [number]: { Model } } = {}
 
 -- Somewhere on the platform that is not on top of the Bebeh or his feed pad.
 local function randomCookiePosition(areaIndex: number): Vector3
-	local center = GameConfig.getAreaCenter(areaIndex)
-	local size = GameConfig.getPlatformSize(areaIndex)
-	local halfX = math.max(8, size.X / 2 - 20)
-	local halfZ = math.max(8, size.Z / 2 - 20)
-	-- Matches where WorldBuilder stands him, so cookies never spawn inside him.
-	local bebehZ = -(size.Z / 2 - 25)
+	-- Cookies belong in the pit and nowhere else, which is what keeps the rest of
+	-- the map walkable instead of carpeted.
+	local pitCenter, pitSize = GameConfig.getCookiePit(areaIndex)
+	local halfX = math.max(6, pitSize.X / 2 - 6)
+	local halfZ = math.max(6, pitSize.Y / 2 - 6)
+	-- The pit floor sits 2.5 studs below the platform, so cookies ride just above it.
+	local y = pitCenter.Y + 0.3
 
-	for _ = 1, 12 do
-		local pos = center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(-halfZ, halfZ))
-		if (pos - (center + Vector3.new(0, 0, bebehZ))).Magnitude > GameConfig.FeedRadius + 16 then
-			return pos
-		end
-	end
-	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(10, halfZ))
+	return Vector3.new(
+		pitCenter.X + math.random(-halfX, halfX),
+		y,
+		pitCenter.Z + math.random(-halfZ, halfZ)
+	)
 end
 
 -- Import models/BigBebehCookie.fbx and name it "CookieModel" in ServerStorage

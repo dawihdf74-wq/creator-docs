@@ -26,11 +26,18 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
-local COOKIE_YELLOW = Color3.fromRGB(255, 214, 120)
-local SPRINKLE_PINK = Color3.fromRGB(255, 150, 220)
-local PANEL_BG = Color3.fromRGB(28, 26, 38)
-local AFFORD_GREEN = Color3.fromRGB(80, 190, 120)
-local DENY_GREY = Color3.fromRGB(78, 74, 92)
+-- Palette. Simulator UI leans on a few saturated accents against a near-black
+-- panel, with every surface outlined -- flat fills with no outline are what
+-- make a menu look unfinished.
+local COOKIE_YELLOW = Color3.fromRGB(255, 206, 92)
+local SPRINKLE_PINK = Color3.fromRGB(255, 132, 214)
+local RUNE_PURPLE = Color3.fromRGB(176, 132, 255)
+local PANEL_BG = Color3.fromRGB(19, 17, 28)
+local ROW_BG = Color3.fromRGB(36, 32, 52)
+local OUTLINE = Color3.fromRGB(8, 7, 14)
+local TEXT_DIM = Color3.fromRGB(150, 145, 172)
+local AFFORD_GREEN = Color3.fromRGB(72, 200, 116)
+local DENY_GREY = Color3.fromRGB(70, 66, 86)
 
 local state = {
 	maxArea = 1,
@@ -54,6 +61,85 @@ local function corner(parent: Instance, radius: number)
 	return c
 end
 
+-- A crisp dark outline. Roblox UI reads as flat without one.
+local function stroke(inst: Instance, thickness: number, color: Color3?, transparency: number?)
+	local s = Instance.new("UIStroke")
+	s.Thickness = thickness
+	s.Color = color or OUTLINE
+	s.Transparency = transparency or 0
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = inst
+	return s
+end
+
+-- Vertical sheen. Subtle, but it is most of the difference between a flat
+-- rectangle and something that looks lit.
+local function gradient(inst: Instance, top: number, bottom: number, rotation: number?)
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.new(top, top, top)),
+		ColorSequenceKeypoint.new(1, Color3.new(bottom, bottom, bottom)),
+	})
+	g.Rotation = rotation or 90
+	g.Parent = inst
+	return g
+end
+
+-- The standard container: dark, outlined, softly lit, with a drop shadow made
+-- from an offset sibling rather than an image asset.
+local function newPanel(parent: Instance, props: { [string]: any }): Frame
+	local shadow = Instance.new("Frame")
+	shadow.Name = "Shadow"
+	shadow.BackgroundColor3 = Color3.new(0, 0, 0)
+	shadow.BackgroundTransparency = 0.55
+	shadow.BorderSizePixel = 0
+	shadow.ZIndex = 0
+	shadow.Parent = parent
+
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = PANEL_BG
+	frame.BorderSizePixel = 0
+	frame.ZIndex = 1
+	for k, v in props do
+		(frame :: any)[k] = v
+	end
+	frame.Parent = parent
+	corner(frame, 14)
+	stroke(frame, 3)
+	gradient(frame, 1.12, 0.88)
+
+	-- Keep the shadow glued under the panel.
+	shadow.AnchorPoint = frame.AnchorPoint
+	shadow.Size = frame.Size
+	shadow.Position = frame.Position + UDim2.fromOffset(0, 5)
+	corner(shadow, 14)
+
+	return frame
+end
+
+-- Chunky pill button with a lighter top face, like the buy buttons in the genre.
+local function newBigButton(parent: Instance, props: { [string]: any }): TextButton
+	local button = Instance.new("TextButton")
+	button.Font = Enum.Font.FredokaOne
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.AutoButtonColor = true
+	button.BorderSizePixel = 0
+	button.BackgroundColor3 = AFFORD_GREEN
+	for k, v in props do
+		(button :: any)[k] = v
+	end
+	button.Parent = parent
+	corner(button, 11)
+	stroke(button, 3)
+	gradient(button, 1.18, 0.82)
+
+	local label = Instance.new("UITextSizeConstraint")
+	label.MaxTextSize = 26
+	label.Parent = button
+	return button
+end
+
 local function newLabel(props: { [string]: any }): TextLabel
 	local label = Instance.new("TextLabel")
 	label.BackgroundTransparency = 1
@@ -64,19 +150,6 @@ local function newLabel(props: { [string]: any }): TextLabel
 		(label :: any)[k] = v
 	end
 	return label
-end
-
-local function newButton(props: { [string]: any }): TextButton
-	local button = Instance.new("TextButton")
-	button.Font = Enum.Font.FredokaOne
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextScaled = true
-	button.AutoButtonColor = true
-	button.BorderSizePixel = 0
-	for k, v in props do
-		(button :: any)[k] = v
-	end
-	return button
 end
 
 local gui = Instance.new("ScreenGui")
@@ -110,15 +183,11 @@ local areaTitle = newLabel({
 areaTitle.Parent = gui
 
 -- Sprinkle purse, top left.
-local purse = Instance.new("Frame")
-purse.Name = "Purse"
-purse.Position = UDim2.new(0, 14, 0, topSafeY(4))
-purse.Size = UDim2.new(0, 190, 0, 42)
-purse.BackgroundColor3 = PANEL_BG
-purse.BackgroundTransparency = 0.15
-purse.BorderSizePixel = 0
-purse.Parent = gui
-corner(purse, 12)
+local purse = newPanel(gui, {
+	Name = "Purse",
+	Position = UDim2.new(0, 14, 0, topSafeY(4)),
+	Size = UDim2.new(0, 204, 0, 46),
+})
 
 local sprinkleLabel = newLabel({
 	Name = "Sprinkles",
@@ -127,6 +196,7 @@ local sprinkleLabel = newLabel({
 	Font = Enum.Font.FredokaOne,
 	Text = "✨ 0",
 	TextColor3 = SPRINKLE_PINK,
+	TextStrokeTransparency = 0.35,
 	TextXAlignment = Enum.TextXAlignment.Left,
 })
 sprinkleLabel.Parent = purse
@@ -159,16 +229,12 @@ toastLayout.Padding = UDim.new(0, 6)
 toastLayout.Parent = toastHolder
 
 -- Bottom panel: what you are carrying, and how hungry the Bebeh still is.
-local panel = Instance.new("Frame")
-panel.Name = "Panel"
-panel.AnchorPoint = Vector2.new(0.5, 1)
-panel.Position = UDim2.new(0.5, 0, 1, -18)
-panel.Size = UDim2.new(0, 440, 0, 132)
-panel.BackgroundColor3 = PANEL_BG
-panel.BackgroundTransparency = 0.15
-panel.BorderSizePixel = 0
-panel.Parent = gui
-corner(panel, 16)
+local panel = newPanel(gui, {
+	Name = "Panel",
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -18),
+	Size = UDim2.new(0, 452, 0, 138),
+})
 
 local carryLabel = newLabel({
 	Name = "Carry",
@@ -177,6 +243,7 @@ local carryLabel = newLabel({
 	Font = Enum.Font.FredokaOne,
 	Text = "🍪 0 / 30",
 	TextColor3 = COOKIE_YELLOW,
+	TextStrokeTransparency = 0.35,
 	TextXAlignment = Enum.TextXAlignment.Left,
 })
 carryLabel.Parent = panel
@@ -185,9 +252,10 @@ local carryBack = Instance.new("Frame")
 carryBack.Name = "CarryBar"
 carryBack.Position = UDim2.new(0, 16, 0, 44)
 carryBack.Size = UDim2.new(1, -32, 0, 10)
-carryBack.BackgroundColor3 = Color3.fromRGB(60, 56, 76)
+carryBack.BackgroundColor3 = Color3.fromRGB(12, 11, 18)
 carryBack.BorderSizePixel = 0
 carryBack.Parent = panel
+stroke(carryBack, 2, Color3.fromRGB(52, 48, 70))
 corner(carryBack, 5)
 
 local carryFill = Instance.new("Frame")
@@ -197,6 +265,7 @@ carryFill.BackgroundColor3 = COOKIE_YELLOW
 carryFill.BorderSizePixel = 0
 carryFill.Parent = carryBack
 corner(carryFill, 5)
+gradient(carryFill, 1.25, 0.85)
 
 local hungerLabel = newLabel({
 	Name = "Hunger",
@@ -211,9 +280,10 @@ local hungerBack = Instance.new("Frame")
 hungerBack.Name = "HungerBar"
 hungerBack.Position = UDim2.new(0, 16, 0, 92)
 hungerBack.Size = UDim2.new(1, -32, 0, 14)
-hungerBack.BackgroundColor3 = Color3.fromRGB(60, 56, 76)
+hungerBack.BackgroundColor3 = Color3.fromRGB(12, 11, 18)
 hungerBack.BorderSizePixel = 0
 hungerBack.Parent = panel
+stroke(hungerBack, 2, Color3.fromRGB(52, 48, 70))
 corner(hungerBack, 7)
 
 local hungerFill = Instance.new("Frame")
@@ -223,6 +293,7 @@ hungerFill.BackgroundColor3 = Color3.fromRGB(255, 150, 190)
 hungerFill.BorderSizePixel = 0
 hungerFill.Parent = hungerBack
 corner(hungerFill, 7)
+gradient(hungerFill, 1.25, 0.85)
 
 local hintLabel = newLabel({
 	Name = "Hint",
@@ -237,27 +308,22 @@ hintLabel.Parent = panel
 
 -- Shop ---------------------------------------------------------------------
 
-local shopButton = newButton({
+local shopButton = newBigButton(gui, {
 	Name = "ShopButton",
 	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -18, 1, -18),
-	Size = UDim2.new(0, 132, 0, 52),
-	BackgroundColor3 = Color3.fromRGB(236, 96, 140),
+	Position = UDim2.new(1, -14, 1, -18),
+	Size = UDim2.new(0, 146, 0, 56),
+	BackgroundColor3 = Color3.fromRGB(236, 92, 138),
 	Text = "🛒 SHOP",
 })
-shopButton.Parent = gui
-corner(shopButton, 14)
 
-local shop = Instance.new("Frame")
-shop.Name = "Shop"
-shop.AnchorPoint = Vector2.new(0.5, 0.5)
-shop.Position = UDim2.new(0.5, 0, 0.5, 0)
-shop.Size = UDim2.new(0, 480, 0, 520)
-shop.BackgroundColor3 = PANEL_BG
-shop.BorderSizePixel = 0
-shop.Visible = false
-shop.Parent = gui
-corner(shop, 18)
+local shop = newPanel(gui, {
+	Name = "Shop",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.new(0.5, 0, 0.5, 0),
+	Size = UDim2.new(0, 500, 0, 536),
+	Visible = false,
+})
 
 local shopTitle = newLabel({
 	Position = UDim2.new(0, 20, 0, 14),
@@ -277,15 +343,13 @@ local shopPurse = newLabel({
 })
 shopPurse.Parent = shop
 
-local closeButton = newButton({
+local closeButton = newBigButton(shop, {
 	AnchorPoint = Vector2.new(1, 0),
 	Position = UDim2.new(1, -14, 0, 14),
-	Size = UDim2.new(0, 40, 0, 40),
-	BackgroundColor3 = Color3.fromRGB(70, 66, 86),
+	Size = UDim2.new(0, 44, 0, 44),
+	BackgroundColor3 = Color3.fromRGB(196, 66, 84),
 	Text = "✕",
 })
-closeButton.Parent = shop
-corner(closeButton, 12)
 
 local list = Instance.new("ScrollingFrame")
 list.Position = UDim2.new(0, 14, 0, 88)
@@ -309,11 +373,13 @@ for index, upgrade in GameConfig.Upgrades do
 	local row = Instance.new("Frame")
 	row.Name = upgrade.Id
 	row.Size = UDim2.new(1, -6, 0, 82)
-	row.BackgroundColor3 = Color3.fromRGB(42, 40, 56)
+	row.BackgroundColor3 = ROW_BG
 	row.BorderSizePixel = 0
 	row.LayoutOrder = index
 	row.Parent = list
 	corner(row, 12)
+	stroke(row, 2)
+	gradient(row, 1.1, 0.92)
 
 	local nameLabel = newLabel({
 		Position = UDim2.new(0, 14, 0, 8),
@@ -344,15 +410,13 @@ for index, upgrade in GameConfig.Upgrades do
 	})
 	effect.Parent = row
 
-	local buy = newButton({
+	local buy = newBigButton(row, {
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.new(0, 120, 0, 58),
+		Size = UDim2.new(0, 122, 0, 58),
 		BackgroundColor3 = AFFORD_GREEN,
 		Text = "✨ 40",
 	})
-	buy.Parent = row
-	corner(buy, 10)
 
 	buy.Activated:Connect(function()
 		Remotes.BuyUpgrade:FireServer(upgrade.Id)
@@ -361,15 +425,13 @@ for index, upgrade in GameConfig.Upgrades do
 	rows[upgrade.Id] = { buy = buy, name = nameLabel, effect = effect }
 end
 
-local rebirthButton = newButton({
+local rebirthButton = newBigButton(shop, {
 	AnchorPoint = Vector2.new(0.5, 1),
 	Position = UDim2.new(0.5, 0, 1, -16),
 	Size = UDim2.new(1, -32, 0, 66),
 	BackgroundColor3 = DENY_GREY,
 	Text = "⭐ REBIRTH",
 })
-rebirthButton.Parent = shop
-corner(rebirthButton, 14)
 
 rebirthButton.Activated:Connect(function()
 	Remotes.Rebirth:FireServer()
@@ -424,187 +486,329 @@ end
 
 -- Runes --------------------------------------------------------------------
 
-local RUNE_PURPLE = Color3.fromRGB(178, 138, 255)
+--[[
+	Two panels, laid out like the rune menus these games use: the ladder on the
+	left (every tier, its odds, how many you hold), a running summary on the
+	right. A strip of family tabs sits above them -- there is one family today,
+	but the menu is built to switch between them.
+]]
 
-local runesButton = newButton({
-	Name = "RunesButton",
-	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -160, 1, -18),
-	Size = UDim2.new(0, 132, 0, 52),
-	BackgroundColor3 = Color3.fromRGB(126, 92, 214),
-	Text = "✦ RUNES",
-})
-runesButton.Parent = gui
-corner(runesButton, 14)
+local selectedRuneType = GameConfig.RuneTypes[1].Id
+local openingSince: number? = nil -- set when the first rune of the session lands
 
 local runeMenu = Instance.new("Frame")
 runeMenu.Name = "RuneMenu"
 runeMenu.AnchorPoint = Vector2.new(0.5, 0.5)
 runeMenu.Position = UDim2.new(0.5, 0, 0.5, 0)
-runeMenu.Size = UDim2.new(0, 640, 0, 520)
-runeMenu.BackgroundColor3 = PANEL_BG
-runeMenu.BorderSizePixel = 0
+runeMenu.Size = UDim2.new(0, 780, 0, 546)
+runeMenu.BackgroundTransparency = 1
 runeMenu.Visible = false
 runeMenu.Parent = gui
-corner(runeMenu, 18)
 
-local runeTitle = newLabel({
-	Position = UDim2.new(0, 20, 0, 14),
-	Size = UDim2.new(1, -110, 0, 34),
-	Font = Enum.Font.FredokaOne,
-	Text = "✦ Cookie Runes",
-	TextColor3 = RUNE_PURPLE,
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-runeTitle.Parent = runeMenu
+-- Family tabs.
+local tabStrip = Instance.new("Frame")
+tabStrip.Size = UDim2.new(1, -64, 0, 46)
+tabStrip.Position = UDim2.new(0, 0, 0, 0)
+tabStrip.BackgroundTransparency = 1
+tabStrip.Parent = runeMenu
 
-local runeSubtitle = newLabel({
-	Position = UDim2.new(0, 20, 0, 50),
-	Size = UDim2.new(1, -110, 0, 24),
-	Text = "0 opened",
-	TextColor3 = Color3.fromRGB(184, 180, 200),
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-runeSubtitle.Parent = runeMenu
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.Padding = UDim.new(0, 8)
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.Parent = tabStrip
 
-local runeClose = newButton({
+local runeClose = newBigButton(runeMenu, {
 	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -14, 0, 14),
-	Size = UDim2.new(0, 40, 0, 40),
-	BackgroundColor3 = Color3.fromRGB(70, 66, 86),
+	Position = UDim2.new(1, 0, 0, 0),
+	Size = UDim2.new(0, 46, 0, 46),
+	BackgroundColor3 = Color3.fromRGB(196, 66, 84),
 	Text = "✕",
 })
-runeClose.Parent = runeMenu
-corner(runeClose, 12)
 
--- Left: the rune ladder. Right: what they add up to.
-local runeList = Instance.new("ScrollingFrame")
-runeList.Position = UDim2.new(0, 14, 0, 86)
-runeList.Size = UDim2.new(0, 384, 1, -100)
-runeList.BackgroundTransparency = 1
-runeList.BorderSizePixel = 0
-runeList.ScrollBarThickness = 5
-runeList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-runeList.CanvasSize = UDim2.new()
-runeList.Parent = runeMenu
+-- Left: the ladder.
+local ladderPanel = newPanel(runeMenu, {
+	Position = UDim2.new(0, 0, 0, 58),
+	Size = UDim2.new(0, 452, 1, -58),
+})
 
-local runeLayout = Instance.new("UIListLayout")
-runeLayout.SortOrder = Enum.SortOrder.LayoutOrder
-runeLayout.Padding = UDim.new(0, 8)
-runeLayout.Parent = runeList
+local ladderTitle = newLabel({
+	Position = UDim2.new(0, 16, 0, 14),
+	Size = UDim2.new(1, -32, 0, 38),
+	Font = Enum.Font.FredokaOne,
+	Text = "Cookie Rune",
+	TextColor3 = COOKIE_YELLOW,
+	TextStrokeTransparency = 0.4,
+})
+ladderTitle.Parent = ladderPanel
 
-local summary = Instance.new("Frame")
-summary.Position = UDim2.new(0, 408, 0, 86)
-summary.Size = UDim2.new(1, -422, 1, -100)
-summary.BackgroundColor3 = Color3.fromRGB(20, 18, 28)
-summary.BorderSizePixel = 0
-summary.Parent = runeMenu
-corner(summary, 14)
+local ladderSubtitle = newLabel({
+	Position = UDim2.new(0, 16, 0, 52),
+	Size = UDim2.new(1, -32, 0, 24),
+	Font = Enum.Font.GothamBold,
+	Text = "0 Opened",
+	TextColor3 = TEXT_DIM,
+})
+ladderSubtitle.Parent = ladderPanel
 
-local summaryTitle = newLabel({
-	Position = UDim2.new(0, 14, 0, 12),
+local ladderList = Instance.new("ScrollingFrame")
+ladderList.Position = UDim2.new(0, 12, 0, 84)
+ladderList.Size = UDim2.new(1, -24, 1, -96)
+ladderList.BackgroundTransparency = 1
+ladderList.BorderSizePixel = 0
+ladderList.ScrollBarThickness = 4
+ladderList.ScrollBarImageColor3 = RUNE_PURPLE
+ladderList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ladderList.CanvasSize = UDim2.new()
+ladderList.Parent = ladderPanel
+
+local ladderLayout = Instance.new("UIListLayout")
+ladderLayout.SortOrder = Enum.SortOrder.LayoutOrder
+ladderLayout.Padding = UDim.new(0, 6)
+ladderLayout.Parent = ladderList
+
+-- Right: the summary.
+local statsPanel = newPanel(runeMenu, {
+	Position = UDim2.new(0, 466, 0, 58),
+	Size = UDim2.new(1, -466, 1, -58),
+})
+
+local statsTitle = newLabel({
+	Position = UDim2.new(0, 14, 0, 14),
+	Size = UDim2.new(1, -28, 0, 34),
+	Font = Enum.Font.FredokaOne,
+	Text = "Cookie Rune",
+	TextColor3 = COOKIE_YELLOW,
+	TextStrokeTransparency = 0.4,
+})
+statsTitle.Parent = statsPanel
+
+local statsSince = newLabel({
+	Position = UDim2.new(0, 14, 0, 52),
+	Size = UDim2.new(1, -28, 0, 22),
+	Font = Enum.Font.Gotham,
+	Text = "Not opening",
+	TextColor3 = TEXT_DIM,
+})
+statsSince.Parent = statsPanel
+
+local statsOpened = newLabel({
+	Position = UDim2.new(0, 14, 0, 76),
+	Size = UDim2.new(1, -28, 0, 26),
+	Font = Enum.Font.GothamBold,
+	Text = "Opened 0",
+	TextColor3 = COOKIE_YELLOW,
+})
+statsOpened.Parent = statsPanel
+
+local statsLuck = newLabel({
+	Position = UDim2.new(0, 14, 0, 106),
 	Size = UDim2.new(1, -28, 0, 26),
 	Font = Enum.Font.FredokaOne,
-	Text = "Your Boosts",
+	Text = "x1 Rune Luck",
 	TextColor3 = RUNE_PURPLE,
 })
-summaryTitle.Parent = summary
+statsLuck.Parent = statsPanel
 
-local summaryBody = newLabel({
-	Position = UDim2.new(0, 14, 0, 46),
-	Size = UDim2.new(1, -28, 1, -60),
-	Font = Enum.Font.GothamBold,
+local statsNote = newLabel({
+	Position = UDim2.new(0, 14, 0, 136),
+	Size = UDim2.new(1, -28, 0, 46),
+	Font = Enum.Font.Gotham,
 	Text = "",
-	TextColor3 = Color3.fromRGB(240, 238, 248),
+	TextColor3 = Color3.fromRGB(112, 108, 132),
 	TextScaled = false,
-	TextSize = 17,
+	TextSize = 13,
 	TextWrapped = true,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
 })
-summaryBody.Parent = summary
+statsNote.Parent = statsPanel
 
--- One row per rune tier, built once and refreshed on sync.
-local runeRows: { [string]: { count: TextLabel, boost: TextLabel } } = {}
+local earnedHeader = newLabel({
+	Position = UDim2.new(0, 14, 0, 188),
+	Size = UDim2.new(1, -28, 0, 26),
+	Font = Enum.Font.FredokaOne,
+	Text = "Earned Runes:",
+	TextColor3 = Color3.fromRGB(236, 232, 250),
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+earnedHeader.Parent = statsPanel
 
-for index, rune in GameConfig.Runes do
-	local row = Instance.new("Frame")
-	row.Name = rune.Id
-	row.Size = UDim2.new(1, -6, 0, 66)
-	row.BackgroundColor3 = Color3.fromRGB(42, 40, 56)
-	row.BorderSizePixel = 0
-	row.LayoutOrder = index
-	row.Parent = runeList
-	corner(row, 12)
+local earnedList = Instance.new("Frame")
+earnedList.Position = UDim2.new(0, 14, 0, 218)
+earnedList.Size = UDim2.new(1, -28, 1, -280)
+earnedList.BackgroundTransparency = 1
+earnedList.Parent = statsPanel
 
-	local swatch = Instance.new("Frame")
-	swatch.Size = UDim2.new(0, 6, 1, -16)
-	swatch.Position = UDim2.new(0, 10, 0, 8)
-	swatch.BackgroundColor3 = rune.Color
-	swatch.BorderSizePixel = 0
-	swatch.Parent = row
-	corner(swatch, 3)
+local earnedLayout = Instance.new("UIListLayout")
+earnedLayout.SortOrder = Enum.SortOrder.LayoutOrder
+earnedLayout.Padding = UDim.new(0, 4)
+earnedLayout.Parent = earnedList
 
-	local nameLabel = newLabel({
-		Position = UDim2.new(0, 26, 0, 8),
-		Size = UDim2.new(1, -160, 0, 24),
-		Font = Enum.Font.FredokaOne,
-		Text = `{rune.Name}  [1/{rune.Odds}]`,
-		TextColor3 = rune.Color,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	nameLabel.Parent = row
+local boostSummary = newLabel({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -12),
+	Size = UDim2.new(1, -28, 0, 48),
+	Font = Enum.Font.FredokaOne,
+	Text = "",
+	TextColor3 = COOKIE_YELLOW,
+	TextScaled = false,
+	TextSize = 19,
+	TextWrapped = true,
+})
+boostSummary.Parent = statsPanel
 
-	local boostLabel = newLabel({
-		Position = UDim2.new(0, 26, 0, 34),
-		Size = UDim2.new(1, -160, 0, 22),
-		Font = Enum.Font.Gotham,
-		Text = "",
-		TextColor3 = Color3.fromRGB(186, 182, 202),
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	boostLabel.Parent = row
+-- Rows, rebuilt whenever the selected family changes.
+local ladderRows: { [string]: TextLabel } = {}
+local earnedRows: { [string]: TextLabel } = {}
 
-	local countLabel = newLabel({
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -14, 0.5, 0),
-		Size = UDim2.new(0, 130, 0, 40),
-		Font = Enum.Font.FredokaOne,
-		Text = "x0",
-		TextColor3 = Color3.fromRGB(255, 255, 255),
-		TextXAlignment = Enum.TextXAlignment.Right,
-	})
-	countLabel.Parent = row
+local function buildRuneRows()
+	for _, child in ladderList:GetChildren() do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+	for _, child in earnedList:GetChildren() do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
+	table.clear(ladderRows)
+	table.clear(earnedRows)
 
-	runeRows[rune.Id] = { count = countLabel, boost = boostLabel }
+	for index, rune in GameConfig.getRunesOfType(selectedRuneType) do
+		local row = Instance.new("Frame")
+		row.Size = UDim2.new(1, -4, 0, 42)
+		row.BackgroundColor3 = ROW_BG
+		row.BorderSizePixel = 0
+		row.LayoutOrder = index
+		row.Parent = ladderList
+		corner(row, 9)
+		stroke(row, 2)
+
+		local pip = Instance.new("Frame")
+		pip.Size = UDim2.new(0, 5, 1, -14)
+		pip.Position = UDim2.new(0, 8, 0, 7)
+		pip.BackgroundColor3 = rune.Color
+		pip.BorderSizePixel = 0
+		pip.Parent = row
+		corner(pip, 3)
+
+		local label = newLabel({
+			Position = UDim2.new(0, 20, 0, 0),
+			Size = UDim2.new(1, -32, 1, 0),
+			Font = Enum.Font.GothamBold,
+			Text = "",
+			TextColor3 = rune.Color,
+			TextScaled = false,
+			TextSize = 18,
+			TextStrokeTransparency = 0.6,
+			TextXAlignment = Enum.TextXAlignment.Left,
+		})
+		label.Parent = row
+		ladderRows[rune.Id] = label
+
+		local earned = newLabel({
+			Size = UDim2.new(1, 0, 0, 22),
+			Font = Enum.Font.GothamBold,
+			Text = "",
+			TextColor3 = rune.Color,
+			TextScaled = false,
+			TextSize = 16,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			LayoutOrder = index,
+		})
+		earned.Parent = earnedList
+		earnedRows[rune.Id] = earned
+	end
+end
+
+local function elapsedText(): string
+	if not openingSince then
+		return "Not opening — stand on the altar"
+	end
+	local secs = math.max(0, math.floor(os.clock() - openingSince))
+	local h = secs // 3600
+	local m = (secs % 3600) // 60
+	local s = secs % 60
+	if h > 0 then
+		return `Opening since {h}h {m}m {s}s`
+	elseif m > 0 then
+		return `Opening since {m}m {s}s`
+	end
+	return `Opening since {s}s`
 end
 
 local function refreshRunes()
-	runeSubtitle.Text = `{GameConfig.abbreviate(state.runesOpened or 0)} opened`
+	local runeType = GameConfig.getRuneType(selectedRuneType)
+	if not runeType then
+		return
+	end
 
-	for _, rune in GameConfig.Runes do
-		local row = runeRows[rune.Id]
+	ladderTitle.Text = runeType.Name
+	ladderTitle.TextColor3 = runeType.Color
+	statsTitle.Text = runeType.Name
+	statsTitle.TextColor3 = runeType.Color
+	statsNote.Text = runeType.Blurb
+	ladderSubtitle.Text = `{GameConfig.abbreviate(state.runesOpened or 0)} Opened`
+
+	statsSince.Text = elapsedText()
+	statsOpened.Text = `Opened {GameConfig.abbreviate(state.runesOpened or 0)}`
+	statsOpened.TextColor3 = runeType.Color
+	statsLuck.Text = `x{string.format("%.2g", GameConfig.getRuneLuck(state))} Rune Luck`
+
+	for _, rune in GameConfig.getRunesOfType(selectedRuneType) do
 		local count = GameConfig.getRuneCount(state, rune.Id)
 		local boost = GameConfig.getRuneBoost(rune, count)
 		local effect = GameConfig.RuneEffectNames[rune.Effect] or rune.Effect
 
-		row.count.Text = `x{GameConfig.abbreviate(count)}`
-		row.count.TextColor3 = count > 0 and Color3.fromRGB(255, 255, 255) or DENY_GREY
-		if count >= rune.MaxStack then
-			row.boost.Text = `MAXED · +x{string.format("%.2f", boost)} {effect}`
-		else
-			row.boost.Text = `+x{string.format("%.2f", boost)} {effect}  ({GameConfig.abbreviate(count)}/{GameConfig.abbreviate(rune.MaxStack)})`
+		local row = ladderRows[rune.Id]
+		if row then
+			row.Text = `{rune.Name} [1/{rune.Odds}] (x{GameConfig.abbreviate(count)})`
+			row.TextTransparency = count > 0 and 0 or 0.45
+		end
+
+		local earned = earnedRows[rune.Id]
+		if earned then
+			if count > 0 then
+				local maxed = count >= rune.MaxStack and "  MAX" or ""
+				earned.Text = `{rune.Name}: {GameConfig.abbreviate(count)}   +x{string.format("%.2f", boost)} {effect}{maxed}`
+				earned.TextTransparency = 0
+			else
+				earned.Text = `{rune.Name}: —`
+				earned.TextTransparency = 0.55
+			end
 		end
 	end
 
-	summaryBody.Text = table.concat({
-		`🍪 Cookies\n   x{string.format("%.2f", GameConfig.getCookieMultiplier(state))}`,
-		`✦ Rune Luck\n   x{string.format("%.2f", GameConfig.getRuneLuck(state))}`,
-		`⛏ Rune Bulk\n   {GameConfig.getRuneBulk(state)} per open`,
-		`❖ Rune Clone\n   {math.floor(GameConfig.getRuneCloneChance(state) * 100)}%`,
-		`\n⭐ Rebirth\n   x{GameConfig.getRebirthMultiplier(state)}`,
-	}, "\n\n")
+	boostSummary.Text = `🍪 x{string.format("%.2f", GameConfig.getCookieMultiplier(state))} cookies`
+		.. `   ·   ⛏ {GameConfig.getRuneBulk(state)}x bulk`
+		.. `   ·   ❖ {math.floor(GameConfig.getRuneCloneChance(state) * 100)}% clone`
 end
+
+-- Family tabs, one per rune family.
+for index, runeType in GameConfig.RuneTypes do
+	local tab = newBigButton(tabStrip, {
+		Size = UDim2.new(0, 190, 1, 0),
+		BackgroundColor3 = runeType.Color,
+		Text = `{runeType.Icon} {runeType.Name}`,
+		LayoutOrder = index,
+	})
+	tab.Activated:Connect(function()
+		selectedRuneType = runeType.Id
+		buildRuneRows()
+		refreshRunes()
+	end)
+end
+
+buildRuneRows()
+
+local runesButton = newBigButton(gui, {
+	Name = "RunesButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -168, 1, -18),
+	Size = UDim2.new(0, 146, 0, 56),
+	BackgroundColor3 = RUNE_PURPLE,
+	Text = "✦ RUNES",
+})
 
 runesButton.Activated:Connect(function()
 	runeMenu.Visible = not runeMenu.Visible
@@ -614,6 +818,16 @@ runesButton.Activated:Connect(function()
 end)
 runeClose.Activated:Connect(function()
 	runeMenu.Visible = false
+end)
+
+-- Keep the session clock ticking while the menu is open.
+task.spawn(function()
+	while true do
+		task.wait(1)
+		if runeMenu.Visible then
+			statsSince.Text = elapsedText()
+		end
+	end
 end)
 
 -- HUD updates --------------------------------------------------------------
@@ -696,9 +910,10 @@ local function buildBoard(face: BasePart)
 
 	local bg = Instance.new("Frame")
 	bg.Size = UDim2.fromScale(1, 1)
-	bg.BackgroundColor3 = Color3.fromRGB(26, 23, 36)
+	bg.BackgroundColor3 = PANEL_BG
 	bg.BorderSizePixel = 0
 	bg.Parent = surface
+	gradient(bg, 1.1, 0.86)
 
 	local title = newLabel({
 		Position = UDim2.new(0, 20, 0, 10),
@@ -706,6 +921,7 @@ local function buildBoard(face: BasePart)
 		Font = Enum.Font.FredokaOne,
 		Text = "🍪 COOKIE UPGRADES",
 		TextColor3 = COOKIE_YELLOW,
+		TextStrokeTransparency = 0.4,
 	})
 	title.Parent = bg
 
@@ -724,11 +940,13 @@ local function buildBoard(face: BasePart)
 	for index, upgrade in GameConfig.Upgrades do
 		local card = Instance.new("Frame")
 		card.Size = UDim2.new(1 / #GameConfig.Upgrades, -12, 1, 0)
-		card.BackgroundColor3 = Color3.fromRGB(44, 40, 60)
+		card.BackgroundColor3 = ROW_BG
 		card.BorderSizePixel = 0
 		card.LayoutOrder = index
 		card.Parent = grid
-		corner(card, 12)
+		corner(card, 14)
+		stroke(card, 3)
+		gradient(card, 1.12, 0.9)
 
 		local icon = newLabel({
 			Position = UDim2.new(0, 8, 0, 8),
@@ -764,15 +982,13 @@ local function buildBoard(face: BasePart)
 		})
 		cost.Parent = card
 
-		local buy = newButton({
+		local buy = newBigButton(card, {
 			AnchorPoint = Vector2.new(0.5, 1),
 			Position = UDim2.new(0.5, 0, 1, -10),
-			Size = UDim2.new(1, -20, 0, 60),
+			Size = UDim2.new(1, -20, 0, 62),
 			BackgroundColor3 = AFFORD_GREEN,
 			Text = "BUY",
 		})
-		buy.Parent = card
-		corner(buy, 10)
 		buy.Activated:Connect(function()
 			Remotes.BuyUpgrade:FireServer(upgrade.Id)
 		end)
@@ -1024,6 +1240,8 @@ Remotes.RuneDrop.OnClientEvent:Connect(function(drops)
 			best, bestOdds = rune, rune.Odds
 		end
 	end
+	openingSince = openingSince or os.clock()
+
 	if not best or best.Odds <= 1 then
 		return
 	end

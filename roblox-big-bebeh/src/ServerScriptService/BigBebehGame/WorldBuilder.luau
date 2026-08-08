@@ -61,8 +61,7 @@ local function buildShop(areaIndex: number, center: Vector3, cfg: any, parent: I
 	folder.Name = "Shop"
 	folder.Parent = parent
 
-	local half = GameConfig.getPlatformSize(areaIndex).X / 2
-	local base = center + Vector3.new(half - 26, 0, half - 26)
+	local base = GameConfig.getLandmark(areaIndex, "ShopOffset")
 
 	makeAnchoredPart("Counter", Vector3.new(16, 6, 6), CFrame.new(base + Vector3.new(0, 3, 0)), Color3.fromRGB(168, 128, 92), folder).Material =
 		Enum.Material.WoodPlanks
@@ -116,13 +115,14 @@ end
 	are drawn by the client onto a SurfaceGui, because prices and levels are
 	per-player; the server only puts up the woodwork.
 ]]
-local function buildUpgradeBoard(center: Vector3, size: Vector3, cfg: any, parent: Instance)
+local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	local folder = Instance.new("Folder")
 	folder.Name = "UpgradeBoard"
 	folder.Parent = parent
 
-	local z = -(size.Z / 2 - 6)
-	local boardWidth, boardHeight = 46, 20
+	local anchor = GameConfig.getLandmark(areaIndex, "BoardOffset")
+	local center, z = Vector3.new(anchor.X, 0, 0), anchor.Z
+	local boardWidth, boardHeight = 52, 22
 
 	for _, side in { -1, 1 } do
 		makeAnchoredPart(
@@ -170,12 +170,12 @@ end
 	The rune altar. Stand on it and runes open by themselves; the server watches
 	the radius, so there is nothing to press.
 ]]
-local function buildRuneAltar(center: Vector3, size: Vector3, cfg: any, parent: Instance)
+local function buildRuneAltar(areaIndex: number, cfg: any, parent: Instance)
 	local folder = Instance.new("Folder")
 	folder.Name = "RuneAltar"
 	folder.Parent = parent
 
-	local base = center + Vector3.new(-(size.X / 2 - 26), 0, size.Z / 2 - 26)
+	local base = GameConfig.getLandmark(areaIndex, "AltarOffset")
 
 	local pad = makeAnchoredPart(
 		"AltarPad",
@@ -221,6 +221,116 @@ local function buildRuneAltar(center: Vector3, size: Vector3, cfg: any, parent: 
 	sign.CanCollide = false
 	makeSign("✦ RUNE ALTAR ✦\nstand here to open", UDim2.fromScale(18, 5), sign, 0)
 
+	return folder
+end
+
+--[[
+	The cookie pit. Cookies spawn only inside this square, so the rest of the map
+	stays clear for the board, the altar and the walk to Big Bebeh. It is sunk a
+	little and ringed with a raised kerb so the boundary reads from any angle.
+]]
+local function buildCookiePit(pitCenter: Vector3, pitSize: Vector2, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "CookiePit"
+	folder.Parent = parent
+
+	local depth = 2.5
+	local floor = makeAnchoredPart(
+		"PitFloor",
+		Vector3.new(pitSize.X, 4, pitSize.Y),
+		CFrame.new(pitCenter + Vector3.new(0, -depth - 2, 0)),
+		cfg.CookieColor:Lerp(Color3.fromRGB(255, 255, 255), 0.35),
+		folder
+	)
+	floor.Material = Enum.Material.Sand
+
+	-- Raised kerb around the rim, in the area's accent colour.
+	local kerbH, kerbW = 2.2, 3.0
+	for _, axis in { "X", "Z" } do
+		for _, side in { -1, 1 } do
+			local size = axis == "X" and Vector3.new(pitSize.X + kerbW * 2, kerbH, kerbW)
+				or Vector3.new(kerbW, kerbH, pitSize.Y + kerbW * 2)
+			local offset = axis == "X" and Vector3.new(0, -depth + kerbH / 2, side * (pitSize.Y / 2 + kerbW / 2))
+				or Vector3.new(side * (pitSize.X / 2 + kerbW / 2), -depth + kerbH / 2, 0)
+			makeAnchoredPart("PitKerb", size, CFrame.new(pitCenter + offset), cfg.AccentColor, folder)
+		end
+	end
+
+	-- Ramps in on the two open sides so nobody has to jump.
+	for _, side in { -1, 1 } do
+		local ramp = makeAnchoredPart(
+			"PitRamp",
+			Vector3.new(16, 1, 9),
+			CFrame.new(pitCenter + Vector3.new(side * (pitSize.X / 2 + 3), -depth / 2 + 0.4, 0))
+				* CFrame.Angles(0, 0, math.rad(side * 16)),
+			cfg.AccentColor:Lerp(Color3.new(0, 0, 0), 0.15),
+			folder
+		)
+		ramp.Material = Enum.Material.SmoothPlastic
+	end
+
+	return folder
+end
+
+-- Scenery so the map is not a bare plane: clumps of bushes and rocks placed
+-- outside the pit and clear of the landmarks.
+local function buildScenery(areaIndex: number, center: Vector3, size: Vector3, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "Scenery"
+	folder.Parent = parent
+
+	local pitCenter, pitSize = GameConfig.getCookiePit(areaIndex)
+	local avoid = {
+		{ pos = pitCenter, radius = math.max(pitSize.X, pitSize.Y) / 2 + 12 },
+		{ pos = GameConfig.getLandmark(areaIndex, "BebehOffset"), radius = 34 },
+		{ pos = GameConfig.getLandmark(areaIndex, "AltarOffset"), radius = 26 },
+		{ pos = GameConfig.getLandmark(areaIndex, "ShopOffset"), radius = 26 },
+		{ pos = GameConfig.getLandmark(areaIndex, "BoardOffset"), radius = 32 },
+	}
+
+	local rng = Random.new(areaIndex * 7919)
+	local halfX, halfZ = size.X / 2 - 12, size.Z / 2 - 12
+	local placed = 0
+	for _ = 1, 220 do
+		if placed >= 26 then
+			break
+		end
+		local pos = center + Vector3.new(rng:NextNumber(-halfX, halfX), 0, rng:NextNumber(-halfZ, halfZ))
+		local ok = true
+		for _, zone in avoid do
+			if (Vector3.new(pos.X, 0, pos.Z) - Vector3.new(zone.pos.X, 0, zone.pos.Z)).Magnitude < zone.radius then
+				ok = false
+				break
+			end
+		end
+		if ok then
+			placed += 1
+			if rng:NextNumber() < 0.55 then
+				-- Bush: a couple of overlapping spheres.
+				for i = 1, 3 do
+					local blob = makeAnchoredPart(
+						"Bush",
+						Vector3.new(rng:NextNumber(4, 7), rng:NextNumber(4, 6), rng:NextNumber(4, 7)),
+						CFrame.new(pos + Vector3.new(rng:NextNumber(-2, 2), 1.6, rng:NextNumber(-2, 2))),
+						cfg.FloorColor:Lerp(Color3.new(0, 0, 0), 0.25 + i * 0.04),
+						folder
+					)
+					blob.Shape = Enum.PartType.Ball
+					blob.CanCollide = false
+					blob.Material = Enum.Material.Grass
+				end
+			else
+				local rock = makeAnchoredPart(
+					"Rock",
+					Vector3.new(rng:NextNumber(4, 8), rng:NextNumber(3, 6), rng:NextNumber(4, 8)),
+					CFrame.new(pos + Vector3.new(0, 1.4, 0)) * CFrame.Angles(0, rng:NextNumber(0, 6.28), 0),
+					Color3.fromRGB(150, 150, 158),
+					folder
+				)
+				rock.Material = Enum.Material.Slate
+			end
+		end
+	end
 	return folder
 end
 
@@ -307,7 +417,7 @@ local function buildArea(areaIndex: number, parent: Instance)
 	makeSign(`{areaIndex}. {cfg.Name}`, UDim2.fromScale(24, 5), marker, 0)
 
 	-- Big Bebeh, at the back of the platform, facing the middle.
-	local bebehPos = center + Vector3.new(0, 0, -(size.Z / 2 - 25))
+	local bebehPos = GameConfig.getLandmark(areaIndex, "BebehOffset")
 	local bebeh = BebehBuilder.build(areaIndex, cfg, CFrame.lookAt(bebehPos, bebehPos + Vector3.new(0, 0, 1)))
 	bebeh.Parent = folder
 
@@ -326,9 +436,12 @@ local function buildArea(areaIndex: number, parent: Instance)
 	pad.Material = Enum.Material.Neon
 	pad.Transparency = 0.6
 
+	local pitCenter, pitSize = GameConfig.getCookiePit(areaIndex)
+	buildCookiePit(pitCenter, pitSize, cfg, folder)
+	buildScenery(areaIndex, center, size, cfg, folder)
 	buildShop(areaIndex, center, cfg, folder)
-	buildUpgradeBoard(center, size, cfg, folder)
-	buildRuneAltar(center, size, cfg, folder)
+	buildUpgradeBoard(areaIndex, cfg, folder)
+	buildRuneAltar(areaIndex, cfg, folder)
 
 	return { folder = folder, bebeh = bebeh, center = center }
 end
