@@ -1,9 +1,9 @@
 --[[
 	Big Bebeh — Cookie Collector (client)
 
-	Owns everything the player sees: the HUD, the spinning cookies, the gate that
-	dissolves once you have unlocked the area behind it, and the little bits of
-	juice (floating "+5", Bebeh bouncing when he eats, toast messages).
+	Owns everything the player sees: the HUD, the upgrade shop, the spinning
+	cookies, the gate that dissolves once you have unlocked the area behind it,
+	and the juice (floating "+5", Bebeh bouncing when he eats, toasts).
 
 	Gates are opened *locally*. The server decides whether you are allowed
 	through; this script just stops drawing a wall you have already earned.
@@ -11,6 +11,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -25,7 +26,10 @@ local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
 local COOKIE_YELLOW = Color3.fromRGB(255, 214, 120)
+local SPRINKLE_PINK = Color3.fromRGB(255, 150, 220)
 local PANEL_BG = Color3.fromRGB(28, 26, 38)
+local AFFORD_GREEN = Color3.fromRGB(80, 190, 120)
+local DENY_GREY = Color3.fromRGB(78, 74, 92)
 
 local state = {
 	maxArea = 1,
@@ -33,9 +37,12 @@ local state = {
 	capacity = GameConfig.Areas[1].CarryCapacity,
 	fed = table.create(#GameConfig.Areas, 0),
 	totalFed = 0,
+	sprinkles = 0,
+	upgrades = {},
+	rebirths = 0,
 }
 
--- HUD ----------------------------------------------------------------------
+-- UI helpers ---------------------------------------------------------------
 
 local function corner(parent: Instance, radius: number)
 	local c = Instance.new("UICorner")
@@ -56,6 +63,19 @@ local function newLabel(props: { [string]: any }): TextLabel
 	return label
 end
 
+local function newButton(props: { [string]: any }): TextButton
+	local button = Instance.new("TextButton")
+	button.Font = Enum.Font.FredokaOne
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.AutoButtonColor = true
+	button.BorderSizePixel = 0
+	for k, v in props do
+		(button :: any)[k] = v
+	end
+	return button
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "BigBebehHUD"
 gui.ResetOnSpawn = false
@@ -63,7 +83,8 @@ gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
--- Area title, top centre.
+-- HUD ----------------------------------------------------------------------
+
 local areaTitle = newLabel({
 	Name = "AreaTitle",
 	AnchorPoint = Vector2.new(0.5, 0),
@@ -74,6 +95,40 @@ local areaTitle = newLabel({
 	TextStrokeTransparency = 0.35,
 })
 areaTitle.Parent = gui
+
+-- Sprinkle purse, top left.
+local purse = Instance.new("Frame")
+purse.Name = "Purse"
+purse.Position = UDim2.new(0, 14, 0, 14)
+purse.Size = UDim2.new(0, 190, 0, 42)
+purse.BackgroundColor3 = PANEL_BG
+purse.BackgroundTransparency = 0.15
+purse.BorderSizePixel = 0
+purse.Parent = gui
+corner(purse, 12)
+
+local sprinkleLabel = newLabel({
+	Name = "Sprinkles",
+	Position = UDim2.new(0, 12, 0, 6),
+	Size = UDim2.new(1, -24, 1, -12),
+	Font = Enum.Font.FredokaOne,
+	Text = "✨ 0",
+	TextColor3 = SPRINKLE_PINK,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+sprinkleLabel.Parent = purse
+
+local rebirthBadge = newLabel({
+	Name = "RebirthBadge",
+	Position = UDim2.new(0, 14, 0, 62),
+	Size = UDim2.new(0, 190, 0, 26),
+	Font = Enum.Font.GothamBold,
+	Text = "",
+	TextColor3 = Color3.fromRGB(255, 226, 130),
+	TextStrokeTransparency = 0.4,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+rebirthBadge.Parent = gui
 
 -- Toast stack, just under the title.
 local toastHolder = Instance.new("Frame")
@@ -167,6 +222,193 @@ local hintLabel = newLabel({
 })
 hintLabel.Parent = panel
 
+-- Shop ---------------------------------------------------------------------
+
+local shopButton = newButton({
+	Name = "ShopButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -18, 1, -18),
+	Size = UDim2.new(0, 132, 0, 52),
+	BackgroundColor3 = Color3.fromRGB(236, 96, 140),
+	Text = "🛒 SHOP",
+})
+shopButton.Parent = gui
+corner(shopButton, 14)
+
+local shop = Instance.new("Frame")
+shop.Name = "Shop"
+shop.AnchorPoint = Vector2.new(0.5, 0.5)
+shop.Position = UDim2.new(0.5, 0, 0.5, 0)
+shop.Size = UDim2.new(0, 480, 0, 520)
+shop.BackgroundColor3 = PANEL_BG
+shop.BorderSizePixel = 0
+shop.Visible = false
+shop.Parent = gui
+corner(shop, 18)
+
+local shopTitle = newLabel({
+	Position = UDim2.new(0, 20, 0, 14),
+	Size = UDim2.new(1, -110, 0, 34),
+	Font = Enum.Font.FredokaOne,
+	Text = "🛒 Upgrade Shop",
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+shopTitle.Parent = shop
+
+local shopPurse = newLabel({
+	Position = UDim2.new(0, 20, 0, 50),
+	Size = UDim2.new(1, -110, 0, 26),
+	Text = "✨ 0 sprinkles",
+	TextColor3 = SPRINKLE_PINK,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+shopPurse.Parent = shop
+
+local closeButton = newButton({
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -14, 0, 14),
+	Size = UDim2.new(0, 40, 0, 40),
+	BackgroundColor3 = Color3.fromRGB(70, 66, 86),
+	Text = "✕",
+})
+closeButton.Parent = shop
+corner(closeButton, 12)
+
+local list = Instance.new("ScrollingFrame")
+list.Position = UDim2.new(0, 14, 0, 88)
+list.Size = UDim2.new(1, -28, 1, -180)
+list.BackgroundTransparency = 1
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 5
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.CanvasSize = UDim2.new()
+list.Parent = shop
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 8)
+listLayout.Parent = list
+
+-- One row per upgrade, built once and refreshed whenever state changes.
+local rows: { [string]: { buy: TextButton, name: TextLabel, effect: TextLabel } } = {}
+
+for index, upgrade in GameConfig.Upgrades do
+	local row = Instance.new("Frame")
+	row.Name = upgrade.Id
+	row.Size = UDim2.new(1, -6, 0, 82)
+	row.BackgroundColor3 = Color3.fromRGB(42, 40, 56)
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index
+	row.Parent = list
+	corner(row, 12)
+
+	local nameLabel = newLabel({
+		Position = UDim2.new(0, 14, 0, 8),
+		Size = UDim2.new(1, -150, 0, 26),
+		Font = Enum.Font.FredokaOne,
+		Text = `{upgrade.Icon} {upgrade.Name}`,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	nameLabel.Parent = row
+
+	local blurb = newLabel({
+		Position = UDim2.new(0, 14, 0, 34),
+		Size = UDim2.new(1, -150, 0, 20),
+		Font = Enum.Font.Gotham,
+		Text = upgrade.Blurb,
+		TextColor3 = Color3.fromRGB(180, 176, 196),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	blurb.Parent = row
+
+	local effect = newLabel({
+		Position = UDim2.new(0, 14, 0, 54),
+		Size = UDim2.new(1, -150, 0, 20),
+		Font = Enum.Font.GothamBold,
+		Text = "",
+		TextColor3 = COOKIE_YELLOW,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	effect.Parent = row
+
+	local buy = newButton({
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.new(0, 120, 0, 58),
+		BackgroundColor3 = AFFORD_GREEN,
+		Text = "✨ 40",
+	})
+	buy.Parent = row
+	corner(buy, 10)
+
+	buy.Activated:Connect(function()
+		Remotes.BuyUpgrade:FireServer(upgrade.Id)
+	end)
+
+	rows[upgrade.Id] = { buy = buy, name = nameLabel, effect = effect }
+end
+
+local rebirthButton = newButton({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -16),
+	Size = UDim2.new(1, -32, 0, 66),
+	BackgroundColor3 = DENY_GREY,
+	Text = "⭐ REBIRTH",
+})
+rebirthButton.Parent = shop
+corner(rebirthButton, 14)
+
+rebirthButton.Activated:Connect(function()
+	Remotes.Rebirth:FireServer()
+end)
+
+local function setShopOpen(open: boolean)
+	shop.Visible = open
+end
+
+shopButton.Activated:Connect(function()
+	setShopOpen(not shop.Visible)
+end)
+closeButton.Activated:Connect(function()
+	setShopOpen(false)
+end)
+
+ProximityPromptService.PromptTriggered:Connect(function(prompt)
+	if CollectionService:HasTag(prompt, "ShopPrompt") then
+		setShopOpen(true)
+	end
+end)
+
+local function refreshShop()
+	shopPurse.Text = `✨ {GameConfig.abbreviate(state.sprinkles)} sprinkles`
+
+	for _, upgrade in GameConfig.Upgrades do
+		local row = rows[upgrade.Id]
+		local level = GameConfig.getUpgradeLevel(state, upgrade.Id)
+
+		row.name.Text = `{upgrade.Icon} {upgrade.Name}  ({level}/{upgrade.MaxLevel})`
+		row.effect.Text = GameConfig.describeUpgrade(state, upgrade)
+
+		if level >= upgrade.MaxLevel then
+			row.buy.Text = "MAX"
+			row.buy.BackgroundColor3 = DENY_GREY
+		else
+			local cost = GameConfig.getUpgradeCost(upgrade, level)
+			row.buy.Text = `✨ {GameConfig.abbreviate(cost)}`
+			row.buy.BackgroundColor3 = state.sprinkles >= cost and AFFORD_GREEN or DENY_GREY
+		end
+	end
+
+	if GameConfig.canRebirth(state) then
+		local nextMultiplier = 1 + GameConfig.RebirthMultiplierPerLevel * (state.rebirths + 1)
+		rebirthButton.Text = `⭐ REBIRTH → x{nextMultiplier} forever`
+		rebirthButton.BackgroundColor3 = Color3.fromRGB(226, 160, 60)
+	else
+		rebirthButton.Text = "⭐ Fill BIG BEBEH to rebirth"
+		rebirthButton.BackgroundColor3 = DENY_GREY
+	end
+end
+
 -- HUD updates --------------------------------------------------------------
 
 local function currentAreaIndex(): number
@@ -195,6 +437,11 @@ local function refreshPanel()
 	local here = currentAreaIndex()
 	areaTitle.Text = `{here}. {GameConfig.Areas[here].Name}`
 
+	sprinkleLabel.Text = `✨ {GameConfig.abbreviate(state.sprinkles)}`
+	rebirthBadge.Text = state.rebirths > 0
+			and `⭐ Rebirth {state.rebirths}  •  x{GameConfig.getRebirthMultiplier(state)}`
+		or ""
+
 	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
 	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
 	carryFill.Size = UDim2.fromScale(carryRatio, 1)
@@ -208,9 +455,10 @@ local function refreshPanel()
 
 	if carryRatio >= 1 then
 		hintLabel.Text = "Hands full — go feed Big Bebeh!"
+	elseif GameConfig.canRebirth(state) then
+		hintLabel.Text = "BIG BEBEH is full. Open the shop and rebirth!"
 	elseif fed >= cfg.HungerGoal then
-		hintLabel.Text = tracked < #GameConfig.Areas and "He's full! Head through the open gate →"
-			or "You fed BIG BEBEH everything. Legend."
+		hintLabel.Text = "He's full! Head through the open gate →"
 	else
 		hintLabel.Text = "Walk over cookies, then stand on the glowing pad to feed him."
 	end
@@ -308,6 +556,7 @@ end)
 Remotes.SyncState.OnClientEvent:Connect(function(newState)
 	state = newState
 	refreshPanel()
+	refreshShop()
 	refreshAllGates()
 	refreshAllBebehs()
 end)
@@ -462,6 +711,7 @@ end)
 
 -- Tell the server we are ready, so we get the first state even if we loaded late.
 Remotes.SyncState:FireServer()
+refreshShop()
 
 task.spawn(function()
 	while true do

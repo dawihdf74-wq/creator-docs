@@ -55,6 +55,61 @@ local function makeSign(text: string, size: UDim2, adornee: BasePart, offsetY: n
 	return billboard
 end
 
+-- A little market stall where Sprinkles get spent.
+local function buildShop(center: Vector3, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "Shop"
+	folder.Parent = parent
+
+	local base = center + Vector3.new(62, 0, 62)
+
+	makeAnchoredPart("Counter", Vector3.new(16, 6, 6), CFrame.new(base + Vector3.new(0, 3, 0)), Color3.fromRGB(168, 128, 92), folder).Material =
+		Enum.Material.WoodPlanks
+	for _, side in { -1, 1 } do
+		makeAnchoredPart(
+			"Post",
+			Vector3.new(1.2, 14, 1.2),
+			CFrame.new(base + Vector3.new(side * 7, 7, -2.6)),
+			Color3.fromRGB(140, 104, 74),
+			folder
+		)
+	end
+
+	-- Striped awning.
+	for i = -3, 3 do
+		makeAnchoredPart(
+			"Awning",
+			Vector3.new(2.4, 0.6, 9),
+			CFrame.new(base + Vector3.new(i * 2.4, 14.5, 0)) * CFrame.Angles(math.rad(-16), 0, 0),
+			(i % 2 == 0) and Color3.fromRGB(240, 96, 110) or Color3.fromRGB(250, 246, 238),
+			folder
+		)
+	end
+
+	local sign = makeAnchoredPart(
+		"ShopSign",
+		Vector3.new(1, 1, 1),
+		CFrame.new(base + Vector3.new(0, 19, 0)),
+		cfg.AccentColor,
+		folder
+	)
+	sign.Transparency = 1
+	sign.CanCollide = false
+	makeSign("🛒 UPGRADE SHOP", UDim2.fromScale(16, 4), sign, 0)
+
+	-- Walking up opens the same panel as the on-screen button.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Open shop"
+	prompt.ObjectText = "Upgrades"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.RequiresLineOfSight = false
+	prompt.MaxActivationDistance = 16
+	prompt.Parent = folder:FindFirstChild("Counter")
+	CollectionService:AddTag(prompt, "ShopPrompt")
+
+	return folder
+end
+
 -- One platform, its fence, its name sign and its Bebeh.
 local function buildArea(areaIndex: number, parent: Instance)
 	local cfg = GameConfig.Areas[areaIndex]
@@ -156,6 +211,8 @@ local function buildArea(areaIndex: number, parent: Instance)
 	pad.CanTouch = false
 	pad.Material = Enum.Material.Neon
 	pad.Transparency = 0.6
+
+	buildShop(center, cfg, folder)
 
 	return { folder = folder, bebeh = bebeh, center = center }
 end

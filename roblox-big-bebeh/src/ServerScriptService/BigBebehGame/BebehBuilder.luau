@@ -1,142 +1,283 @@
 --[[
 	BebehBuilder
-	Builds Big Bebeh out of parts: a chunky brown cube head, floppy yellow bunny
-	ears, sleepy closed eyes, blushy cheeks, a blue bib and a big blue pacifier.
+	Builds Big Bebeh: a chunky rounded brown head, long floppy yellow ears,
+	sleepy arced eyes, blushy cheeks, a blue bib and a big blue pacifier.
 
-	Want your own model instead? Drop a Model named "BigBebeh" into ServerStorage
-	and this module will clone and scale that instead of building the blocky one.
+	Three ways to get a Bebeh, in priority order:
+	  1. A Model named "BigBebeh" in ServerStorage — cloned and scaled.
+	  2. GameConfig.BebehImageId — a flat cutout of your own artwork.
+	  3. Otherwise, the part-built one below.
+
+	Roblox has no rounded-box primitive, so the chunky shapes here are built the
+	way modelling packages do it: a core of slabs, cylinders along the edges and
+	spheres at the corners. That is what stops him reading as a stack of bricks.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+
+local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 
 local BebehBuilder = {}
 
-local BROWN = Color3.fromRGB(150, 108, 74)
-local DARK_BROWN = Color3.fromRGB(118, 82, 55)
-local EAR_YELLOW = Color3.fromRGB(248, 226, 74)
-local BIB_BLUE = Color3.fromRGB(150, 215, 240)
-local PACI_BLUE = Color3.fromRGB(86, 150, 240)
+local BROWN = Color3.fromRGB(156, 112, 76)
+local BROWN_DARK = Color3.fromRGB(120, 84, 56)
+local EAR_YELLOW = Color3.fromRGB(250, 226, 72)
+local EAR_YELLOW_DARK = Color3.fromRGB(222, 196, 48)
+local BIB_BLUE = Color3.fromRGB(152, 216, 240)
+local BIB_BLUE_LIGHT = Color3.fromRGB(196, 234, 250)
+local PACI_BLUE = Color3.fromRGB(88, 152, 242)
 local PACI_PURPLE = Color3.fromRGB(150, 120, 226)
-local BLUSH = Color3.fromRGB(240, 140, 140)
-local DIAPER = Color3.fromRGB(245, 243, 236)
+local BLUSH = Color3.fromRGB(238, 138, 138)
+local DIAPER = Color3.fromRGB(246, 244, 238)
+local INK = Color3.fromRGB(18, 16, 16)
 
-local function makePart(name: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Size = size
-	p.CFrame = cf
-	p.Color = color
-	p.Shape = shape or Enum.PartType.Block
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanTouch = false
-	p.CanQuery = false
-	p.Material = Enum.Material.SmoothPlastic
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	return p
-end
-
--- The model is authored around the origin facing -Z (Roblox's "forward").
-local function buildBlockyBebeh(scale: number): Model
-	local model = Instance.new("Model")
+--[[
+	Collects parts as we go. Every piece is authored around the origin with the
+	face pointing down -Z, then the whole model is moved into place at the end.
+]]
+local function newBuilder(scale: number)
+	local pieces: { Part } = {}
 
 	local function s(n: number)
 		return n * scale
 	end
-	local function v(x: number, y: number, z: number)
-		return Vector3.new(s(x), s(y), s(z))
-	end
-	local function at(x: number, y: number, z: number)
-		return CFrame.new(s(x), s(y), s(z))
-	end
 
-	local pieces = {}
-	local function add(p: Part)
+	local function add(name: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?, material: Enum.Material?): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.CFrame = cf
+		p.Color = color
+		p.Shape = shape or Enum.PartType.Block
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
 		table.insert(pieces, p)
 		return p
 	end
 
-	-- Head ------------------------------------------------------------------
-	local head = add(makePart("Head", v(14, 13, 13), at(0, 0, 0), BROWN))
-	head.CanCollide = true
-	head.CanQuery = true
-	model.PrimaryPart = head
+	-- A box with every edge and corner rounded off: 3 slabs + 12 edges + 8 corners.
+	local function roundedBox(name: string, size: Vector3, cf: CFrame, color: Color3, radius: number, material: Enum.Material?)
+		local r = math.min(radius, size.X / 2, size.Y / 2, size.Z / 2)
+		local ix, iy, iz = size.X - 2 * r, size.Y - 2 * r, size.Z - 2 * r
+		local d = r * 2
 
-	-- The darker band and yellow stripe running down his left side.
-	add(makePart("SideShade", v(0.3, 13.1, 13.1), at(-6.9, 0, 0), DARK_BROWN))
-	add(makePart("Stripe", v(0.35, 13.15, 3.2), at(-7.0, 0, 1.2), EAR_YELLOW))
+		add(name, Vector3.new(size.X, iy, iz), cf, color, nil, material)
+		add(name, Vector3.new(ix, size.Y, iz), cf, color, nil, material)
+		add(name, Vector3.new(ix, iy, size.Z), cf, color, nil, material)
 
-	-- Ears ------------------------------------------------------------------
-	-- Long floppy bunny ears splayed out in a V above the head.
-	for _, side in { -1, 1 } do
-		local ear = add(makePart("Ear", v(2.4, 13, 1.1), CFrame.new(), EAR_YELLOW))
-		ear.CFrame = at(side * 3.2, 6.5, 0.5)
-			* CFrame.Angles(math.rad(-8), 0, math.rad(side * 38))
-			* CFrame.new(0, s(6), 0)
-	end
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				-- Edges running along X, then Y, then Z.
+				add(name, Vector3.new(ix, d, d), cf * CFrame.new(0, a * iy / 2, b * iz / 2), color, Enum.PartType.Cylinder, material)
+				add(
+					name,
+					Vector3.new(iy, d, d),
+					cf * CFrame.new(a * ix / 2, 0, b * iz / 2) * CFrame.Angles(0, 0, math.rad(90)),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+				add(
+					name,
+					Vector3.new(iz, d, d),
+					cf * CFrame.new(a * ix / 2, b * iy / 2, 0) * CFrame.Angles(0, math.rad(90), 0),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+			end
+		end
 
-	-- Eyes ------------------------------------------------------------------
-	-- Sleepy closed eyes: two strokes per eye meeting at the bottom.
-	local faceZ = -6.6
-	for _, side in { -1, 1 } do
-		for _, lash in { -1, 1 } do
-			add(makePart(
-				"Eye",
-				v(0.55, 3.6, 0.35),
-				at(side * 3.6 + lash * 1.05, 2.6, faceZ) * CFrame.Angles(0, 0, math.rad(lash * -22)),
-				Color3.fromRGB(15, 15, 15)
-			))
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				for _, c in { -1, 1 } do
+					add(
+						name,
+						Vector3.new(d, d, d),
+						cf * CFrame.new(a * ix / 2, b * iy / 2, c * iz / 2),
+						color,
+						Enum.PartType.Ball,
+						material
+					)
+				end
+			end
 		end
 	end
 
-	-- Blushy cheeks ---------------------------------------------------------
-	for _, side in { -1, 1 } do
-		local cheek = add(makePart("Blush", v(3.4, 2.2, 1), at(side * 4.6, -0.6, faceZ + 0.1), BLUSH, Enum.PartType.Ball))
-		cheek.Transparency = 0.35
+	-- A flat slab with only its outline rounded — for ears, bibs and stripes.
+	local function roundedPlate(name: string, size: Vector3, cf: CFrame, color: Color3, radius: number, material: Enum.Material?)
+		local r = math.min(radius, size.X / 2, size.Y / 2)
+		local ix, iy = size.X - 2 * r, size.Y - 2 * r
+		local d = r * 2
+
+		add(name, Vector3.new(size.X, iy, size.Z), cf, color, nil, material)
+		add(name, Vector3.new(ix, size.Y, size.Z), cf, color, nil, material)
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				add(
+					name,
+					Vector3.new(size.Z, d, d),
+					cf * CFrame.new(a * ix / 2, b * iy / 2, 0) * CFrame.Angles(0, math.rad(90), 0),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+			end
+		end
 	end
 
-	-- Bib -------------------------------------------------------------------
-	add(makePart("Bib", v(12.6, 4.2, 0.7), at(0, -4.4, faceZ - 0.1), BIB_BLUE))
-	add(makePart("BibLeft", v(2.6, 3.2, 0.7), at(-6.6, -2.6, faceZ - 0.1), BIB_BLUE))
-	add(makePart("BibRight", v(2.6, 3.2, 0.7), at(6.6, -2.6, faceZ - 0.1), BIB_BLUE))
-	-- Little bow in the middle of the bib.
+	return {
+		pieces = pieces,
+		s = s,
+		add = add,
+		roundedBox = roundedBox,
+		roundedPlate = roundedPlate,
+	}
+end
+
+local function buildBlockyBebeh(scale: number): Model
+	local model = Instance.new("Model")
+	local b = newBuilder(scale)
+	local s, add = b.s, b.add
+
+	local function at(x: number, y: number, z: number)
+		return CFrame.new(s(x), s(y), s(z))
+	end
+	local function v(x: number, y: number, z: number)
+		return Vector3.new(s(x), s(y), s(z))
+	end
+
+	local faceZ = -6.5 -- the front plane of the head
+
+	-- Head -------------------------------------------------------------------
+	b.roundedBox("Head", v(14, 13, 13), at(0, 0, 0), BROWN, s(2.6))
+
+	-- Shading down his left side, and the yellow stripe from the reference.
+	b.roundedPlate("SideShade", v(9, 11, 0.4), at(-7.05, 0, 0) * CFrame.Angles(0, math.rad(90), 0), BROWN_DARK, s(1.5))
+	b.roundedPlate("Stripe", v(9.4, 3.2, 0.4), at(-7.15, 0.4, 0.6) * CFrame.Angles(0, math.rad(90), 0), EAR_YELLOW, s(1.4))
+
+	-- Ears -------------------------------------------------------------------
+	-- Two segments each so they taper and flop outward instead of standing stiff.
 	for _, side in { -1, 1 } do
-		add(makePart(
+		local root = at(side * 3.4, 6.2, 0.4) * CFrame.Angles(math.rad(-10), 0, math.rad(side * 34))
+		b.roundedPlate("Ear", v(3.4, 9, 1.1), root * CFrame.new(0, s(4.2), 0), EAR_YELLOW, s(1.5))
+		-- The outer half bends a little further out, giving the floppy silhouette.
+		local tip = root * CFrame.new(0, s(8.4), 0) * CFrame.Angles(0, 0, math.rad(side * 12))
+		b.roundedPlate("EarTip", v(2.6, 7, 1.05), tip * CFrame.new(0, s(3.2), 0), EAR_YELLOW, s(1.2))
+		b.roundedPlate("EarInner", v(1.5, 5.2, 0.3), root * CFrame.new(0, s(4.6), s(-0.5)), EAR_YELLOW_DARK, s(0.7))
+	end
+
+	-- Eyes -------------------------------------------------------------------
+	-- Sleepy closed eyes, drawn as an arc of beads peaking in the middle.
+	for _, side in { -1, 1 } do
+		for i = 0, 6 do
+			local t = (i / 6) * 2 - 1
+			add(
+				"Eye",
+				v(0.9, 0.9, 0.5),
+				at(side * 3.7 + t * 2.0, 2.5 - 1.35 * t * t, faceZ - 0.05),
+				INK,
+				Enum.PartType.Ball
+			)
+		end
+	end
+
+	-- Blush ------------------------------------------------------------------
+	for _, side in { -1, 1 } do
+		local cheek = add("Blush", v(3.8, 2.3, 0.9), at(side * 4.7, -0.4, faceZ), BLUSH, Enum.PartType.Ball)
+		cheek.Transparency = 0.4
+	end
+
+	-- Bib --------------------------------------------------------------------
+	b.roundedPlate("Bib", v(13, 4.6, 0.8), at(0, -4.3, faceZ - 0.25), BIB_BLUE, s(2))
+	-- Shoulder straps sweeping up either side.
+	for _, side in { -1, 1 } do
+		b.roundedPlate(
+			"BibStrap",
+			v(3.4, 4.6, 0.8),
+			at(side * 6.1, -2.2, faceZ - 0.25) * CFrame.Angles(0, 0, math.rad(side * -28)),
+			BIB_BLUE,
+			s(1.4)
+		)
+	end
+	-- Bow.
+	for _, side in { -1, 1 } do
+		b.roundedPlate(
 			"BowLoop",
-			v(2.2, 1.6, 0.6),
-			at(side * 1.6, -5.6, faceZ - 0.5) * CFrame.Angles(0, 0, math.rad(side * 18)),
-			BIB_BLUE
-		))
+			v(2.6, 1.9, 0.7),
+			at(side * 1.9, -5.9, faceZ - 0.7) * CFrame.Angles(0, 0, math.rad(side * 20)),
+			BIB_BLUE_LIGHT,
+			s(0.85)
+		)
 	end
-	add(makePart("BowKnot", v(1.1, 1.1, 0.7), at(0, -5.5, faceZ - 0.6), Color3.fromRGB(180, 232, 248)))
+	add("BowKnot", v(1.3, 1.3, 1.3), at(0, -5.8, faceZ - 0.85), BIB_BLUE_LIGHT, Enum.PartType.Ball)
 
-	-- Pacifier --------------------------------------------------------------
-	add(makePart("PaciShield", v(5.4, 3.6, 1.6), at(0, -2.4, faceZ - 0.7), BIB_BLUE, Enum.PartType.Ball))
-	add(makePart("PaciKnob", v(2.8, 2.8, 2.4), at(0, -2.2, faceZ - 1.8), PACI_BLUE, Enum.PartType.Ball))
-	-- The ring is faked with eight short segments so it reads as a torus.
-	for i = 0, 7 do
-		local angle = (i / 8) * math.pi * 2
-		add(makePart(
+	-- Pacifier ---------------------------------------------------------------
+	add("PaciShield", v(6, 4, 1.8), at(0, -2.3, faceZ - 0.8), BIB_BLUE, Enum.PartType.Ball)
+	add("PaciKnob", v(3, 3, 2.6), at(0, -2.1, faceZ - 1.9), PACI_BLUE, Enum.PartType.Ball)
+	-- The ring is a circle of beads, which reads as a torus from any angle.
+	for i = 0, 11 do
+		local angle = (i / 12) * math.pi * 2
+		add(
 			"PaciRing",
-			v(0.85, 0.85, 1.7),
-			at(0, -3.6, faceZ - 2.4)
-				* CFrame.new(math.cos(angle) * s(1.7), math.sin(angle) * s(1.7), 0)
-				* CFrame.Angles(0, 0, angle),
-			PACI_PURPLE
-		))
+			v(1.05, 1.05, 1.05),
+			at(0, -3.5, faceZ - 2.7) * CFrame.new(math.cos(angle) * s(1.9), math.sin(angle) * s(1.9), 0),
+			PACI_PURPLE,
+			Enum.PartType.Ball
+		)
 	end
 
-	-- Diaper and feet -------------------------------------------------------
-	add(makePart("Diaper", v(13.4, 3.4, 13.4), at(0, -7.6, 0), DIAPER))
+	-- Body -------------------------------------------------------------------
+	b.roundedBox("Diaper", v(13.2, 4, 13.2), at(0, -7.8, 0), DIAPER, s(1.8))
 	for _, side in { -1, 1 } do
-		add(makePart("Foot", v(4, 2.6, 5.4), at(side * 3.6, -10, -1.6), BROWN))
+		add("Foot", v(4.4, 2.8, 5.8), at(side * 3.5, -10.2, -1.8), BROWN, Enum.PartType.Ball)
 	end
-	add(makePart("Tail", v(2.6, 2.6, 2.6), at(0, -8.6, 7), EAR_YELLOW, Enum.PartType.Ball))
+	add("Tail", v(3, 3, 3), at(0, -8.4, 7.2), EAR_YELLOW, Enum.PartType.Ball)
 
-	for _, p in pieces do
+	-- One invisible box does all the colliding, so players bump into a clean
+	-- shape instead of catching on ears and pacifier beads.
+	local collider = add("Collider", v(14.5, 22, 14), at(0, -4, 0), BROWN)
+	collider.Transparency = 1
+	collider.CanCollide = true
+	collider.CanQuery = true
+	model.PrimaryPart = collider
+
+	for _, p in b.pieces do
 		p.Parent = model
+	end
+	return model
+end
+
+-- A flat cutout of the user's own artwork, printed on both faces.
+local function buildImageBebeh(scale: number, imageId: string): Model
+	local model = Instance.new("Model")
+
+	local height = 24 * scale
+	local width = height * GameConfig.BebehImageAspect
+
+	local board = Instance.new("Part")
+	board.Name = "Bebeh"
+	board.Size = Vector3.new(width, height, 0.6)
+	board.CFrame = CFrame.new(0, 0, 0)
+	board.Anchored = true
+	board.CanCollide = true
+	board.CanTouch = false
+	board.Transparency = 1 -- decals still draw on an invisible part
+	board.Parent = model
+	model.PrimaryPart = board
+
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local decal = Instance.new("Decal")
+		decal.Texture = imageId
+		decal.Face = face
+		decal.Parent = board
 	end
 
 	return model
@@ -161,6 +302,8 @@ function BebehBuilder.build(areaIndex: number, areaConfig: any, pivot: CFrame): 
 		if not ok then
 			warn(`[BigBebeh] Could not scale ServerStorage.BigBebeh: {err}`)
 		end
+	elseif GameConfig.BebehImageId ~= "" then
+		model = buildImageBebeh(scale, GameConfig.BebehImageId)
 	else
 		model = buildBlockyBebeh(scale)
 	end

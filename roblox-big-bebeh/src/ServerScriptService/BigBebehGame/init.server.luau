@@ -4,8 +4,11 @@
 	The loop:
 	  1. Cookies lie around each area. Walk over one to pick it up.
 	  2. Your hands only hold so many; when they are full, go feed Big Bebeh.
-	  3. Stand on his pad and he eats everything you are carrying.
+	  3. Stand on his pad and he eats everything you are carrying, paying out
+	     Sprinkles as he goes.
 	  4. Fill his hunger bar and the gate to the next area opens for you.
+	  5. Spend Sprinkles at the shop on hands, speed, magnet and luck.
+	  6. Once BIG BEBEH is full, rebirth for a permanent multiplier.
 
 	All tuning lives in ReplicatedStorage/BigBebehShared/GameConfig.
 ]]
@@ -21,13 +24,19 @@ local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
 
 local COOKIE_COLOR = Color3.fromRGB(255, 226, 140)
+local LUCKY_COLOR = Color3.fromRGB(150, 255, 170)
 local UNLOCK_COLOR = Color3.fromRGB(140, 255, 170)
+local SPRINKLE_COLOR = Color3.fromRGB(255, 150, 220)
+local DENY_COLOR = Color3.fromRGB(255, 150, 130)
 
 local world = WorldBuilder.build()
 
 local cookiePool = Instance.new("Folder")
 cookiePool.Name = "CookiePool"
 cookiePool.Parent = ServerStorage
+
+-- Cookies grouped by area, so the magnet only ever scans one platform's worth.
+local cookiesByArea: { [number]: { Model } } = {}
 
 -- Cookie spawning ----------------------------------------------------------
 
@@ -118,6 +127,14 @@ local function toast(player: Player, message: string, color: Color3?, throttleSe
 	Remotes.Toast:FireClient(player, message, color or Color3.fromRGB(255, 255, 255))
 end
 
+local function applyWalkSpeed(player: Player, state: any)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = GameConfig.getWalkSpeed(state)
+	end
+end
+
 local function sync(player: Player)
 	local state = PlayerState.get(player)
 	if not state then
@@ -127,16 +144,20 @@ local function sync(player: Player)
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Cookies.Value = state.carried
-		stats.Fed.Value = state.totalFed
+		stats.Sprinkles.Value = state.sprinkles
 		stats.Area.Value = state.maxArea
+		stats.Rebirths.Value = state.rebirths
 	end
 
 	Remotes.SyncState:FireClient(player, {
 		maxArea = state.maxArea,
 		carried = state.carried,
-		capacity = GameConfig.getCapacity(state.maxArea),
+		capacity = GameConfig.getCapacity(state),
 		fed = state.fed,
 		totalFed = state.totalFed,
+		sprinkles = state.sprinkles,
+		upgrades = state.upgrades,
+		rebirths = state.rebirths,
 	})
 end
 
@@ -156,7 +177,8 @@ end
 
 -- Collecting ---------------------------------------------------------------
 
-local function collect(player: Player, model: Model)
+-- `allowedRange` lets the magnet reach further than a plain footstep pickup.
+local function collect(player: Player, model: Model, allowedRange: number?)
 	local state = PlayerState.get(player)
 	if not state then
 		return
@@ -168,7 +190,7 @@ local function collect(player: Player, model: Model)
 		return
 	end
 
-	local capacity = GameConfig.getCapacity(state.maxArea)
+	local capacity = GameConfig.getCapacity(state)
 	if state.carried >= capacity then
 		toast(player, "Hands full! Go feed Big Bebeh 🍪", Color3.fromRGB(255, 180, 120), 3)
 		return
@@ -179,15 +201,25 @@ local function collect(player: Player, model: Model)
 	if not root or not model.PrimaryPart then
 		return
 	end
-	if (root.Position - model.PrimaryPart.Position).Magnitude > GameConfig.CollectRange then
+	if (root.Position - model.PrimaryPart.Position).Magnitude > (allowedRange or GameConfig.CollectRange) then
 		return
 	end
 
-	local value = model:GetAttribute("Value") :: number
-	local gained = math.min(value, capacity - state.carried)
+	local value = (model:GetAttribute("Value") :: number) * GameConfig.getRebirthMultiplier(state)
+	local lucky = math.random() < GameConfig.getLuckChance(state)
+	if lucky then
+		value *= 2
+	end
+
+	local gained = math.min(math.floor(value), capacity - state.carried)
 	state.carried += gained
 
-	Remotes.CookiePop:FireClient(player, model.PrimaryPart.Position, `+{GameConfig.abbreviate(gained)}`, COOKIE_COLOR)
+	Remotes.CookiePop:FireClient(
+		player,
+		model.PrimaryPart.Position,
+		lucky and `+{GameConfig.abbreviate(gained)} x2!` or `+{GameConfig.abbreviate(gained)}`,
+		lucky and LUCKY_COLOR or COOKIE_COLOR
+	)
 	sync(player)
 
 	-- Hide it, then bring it back somewhere else on the same platform.
@@ -218,12 +250,51 @@ local function armCookie(model: Model)
 end
 
 for areaIndex = 1, #GameConfig.Areas do
+	cookiesByArea[areaIndex] = {}
 	for _ = 1, GameConfig.Areas[areaIndex].CookieCount do
 		local cookie = createCookie(areaIndex)
 		placeCookie(cookie)
 		armCookie(cookie)
+		table.insert(cookiesByArea[areaIndex], cookie)
 	end
 end
+
+-- Magnet -------------------------------------------------------------------
+
+task.spawn(function()
+	while true do
+		task.wait(GameConfig.MagnetInterval)
+		for player, state in PlayerState.all() do
+			local radius = GameConfig.getMagnetRadius(state)
+			if radius <= 0 then
+				continue
+			end
+
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if not root or state.carried >= GameConfig.getCapacity(state) then
+				continue
+			end
+
+			local areaIndex = areaAtPosition(root.Position)
+			if areaIndex > state.maxArea then
+				continue
+			end
+
+			for _, cookie in cookiesByArea[areaIndex] do
+				if cookie.Parent ~= world.cookiesFolder or not cookie.PrimaryPart then
+					continue
+				end
+				if (cookie.PrimaryPart.Position - root.Position).Magnitude <= radius then
+					collect(player, cookie, radius + 6)
+					if state.carried >= GameConfig.getCapacity(state) then
+						break
+					end
+				end
+			end
+		end
+	end
+end)
 
 -- Feeding ------------------------------------------------------------------
 
@@ -249,18 +320,29 @@ local function feed(player: Player, areaIndex: number)
 	state.fed[areaIndex] += amount
 	state.totalFed += amount
 
+	local earned = math.floor(amount * GameConfig.SprinklesPerCookieFed * GameConfig.getRebirthMultiplier(state))
+	state.sprinkles += earned
+
 	local bebeh = bebehs[areaIndex]
 	if bebeh then
 		Remotes.FeedBurst:FireClient(player, bebeh, amount)
+		if earned > 0 then
+			Remotes.CookiePop:FireClient(
+				player,
+				bebeh:GetPivot().Position,
+				`+{GameConfig.abbreviate(earned)} ✨`,
+				SPRINKLE_COLOR
+			)
+		end
 	end
 
 	if state.fed[areaIndex] >= cfg.HungerGoal then
 		if areaIndex < #GameConfig.Areas and state.maxArea == areaIndex then
 			state.maxArea = areaIndex + 1
 			local nextCfg = GameConfig.Areas[state.maxArea]
-			toast(player, `🎉 {nextCfg.Name} unlocked! Carry up to {GameConfig.abbreviate(nextCfg.CarryCapacity)}`, UNLOCK_COLOR)
+			toast(player, `🎉 {nextCfg.Name} unlocked!`, UNLOCK_COLOR)
 		elseif areaIndex == #GameConfig.Areas then
-			toast(player, "🏆 BIG BEBEH IS FULL. You win! 🏆", UNLOCK_COLOR)
+			toast(player, "🏆 BIG BEBEH IS FULL — rebirth is ready!", UNLOCK_COLOR)
 		end
 	end
 
@@ -302,6 +384,65 @@ task.spawn(function()
 	end
 end)
 
+-- Shop and rebirth ---------------------------------------------------------
+
+Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
+	if type(upgradeId) ~= "string" then
+		return
+	end
+	local state = PlayerState.get(player)
+	local upgrade = GameConfig.getUpgrade(upgradeId)
+	if not state or not upgrade then
+		return
+	end
+
+	local level = GameConfig.getUpgradeLevel(state, upgradeId)
+	if level >= upgrade.MaxLevel then
+		toast(player, `{upgrade.Name} is already maxed out!`, DENY_COLOR, 1)
+		return
+	end
+
+	local cost = GameConfig.getUpgradeCost(upgrade, level)
+	if state.sprinkles < cost then
+		toast(player, `Need {GameConfig.abbreviate(cost - state.sprinkles)} more sprinkles`, DENY_COLOR, 1)
+		return
+	end
+
+	state.sprinkles -= cost
+	state.upgrades[upgradeId] = level + 1
+	applyWalkSpeed(player, state)
+	toast(player, `{upgrade.Icon} {upgrade.Name} → level {level + 1}`, SPRINKLE_COLOR)
+	sync(player)
+end)
+
+Remotes.Rebirth.OnServerEvent:Connect(function(player)
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+	if not GameConfig.canRebirth(state) then
+		toast(player, "Fill BIG BEBEH first to rebirth!", DENY_COLOR, 1)
+		return
+	end
+
+	state.rebirths += 1
+	state.maxArea = 1
+	state.carried = 0
+	for i = 1, #GameConfig.Areas do
+		state.fed[i] = 0
+	end
+	state.sprinkles += GameConfig.RebirthSprinkleBonus
+
+	teleportToArea(player, 1)
+	applyWalkSpeed(player, state)
+	toast(
+		player,
+		`⭐ Rebirth {state.rebirths}! Everything you collect is now x{GameConfig.getRebirthMultiplier(state)}`,
+		UNLOCK_COLOR
+	)
+	sync(player)
+end)
+
 -- Players ------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
@@ -309,7 +450,7 @@ local function onPlayerAdded(player: Player)
 
 	local stats = Instance.new("Folder")
 	stats.Name = "leaderstats"
-	for _, name in { "Cookies", "Fed", "Area" } do
+	for _, name in { "Cookies", "Sprinkles", "Area", "Rebirths" } do
 		local value = Instance.new("IntValue")
 		value.Name = name
 		value.Parent = stats
@@ -318,9 +459,11 @@ local function onPlayerAdded(player: Player)
 
 	player.CharacterAdded:Connect(function()
 		task.wait(0.5)
+		applyWalkSpeed(player, state)
 		sync(player)
 	end)
 
+	applyWalkSpeed(player, state)
 	sync(player)
 	toast(player, `Welcome! Collect cookies and feed {GameConfig.Areas[state.maxArea].BebehName}.`, COOKIE_COLOR)
 end

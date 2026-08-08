@@ -3,10 +3,13 @@
 	Per-player progress, with optional DataStore persistence.
 
 	state = {
-		maxArea  = 1,          -- highest area unlocked
-		carried  = 0,          -- cookies currently in hand
-		fed      = { 12, 0 },  -- cookies fed to each area's Bebeh
-		totalFed = 12,
+		maxArea   = 1,          -- highest area unlocked
+		carried   = 0,          -- cookies currently in hand
+		fed       = { 12, 0 },  -- cookies fed to each area's Bebeh
+		totalFed  = 12,
+		sprinkles = 340,        -- upgrade currency, earned by feeding
+		upgrades  = { Capacity = 3, Speed = 1 },
+		rebirths  = 0,
 	}
 ]]
 
@@ -32,12 +35,18 @@ if GameConfig.SaveEnabled then
 end
 
 local function defaultState()
-	local fed = table.create(#GameConfig.Areas, 0)
+	local upgrades = {}
+	for _, upgrade in GameConfig.Upgrades do
+		upgrades[upgrade.Id] = 0
+	end
 	return {
 		maxArea = 1,
 		carried = 0,
-		fed = fed,
+		fed = table.create(#GameConfig.Areas, 0),
 		totalFed = 0,
+		sprinkles = 0,
+		upgrades = upgrades,
+		rebirths = 0,
 	}
 end
 
@@ -52,8 +61,25 @@ local function sanitize(raw: any)
 	if type(raw.maxArea) == "number" then
 		state.maxArea = math.clamp(math.floor(raw.maxArea), 1, #GameConfig.Areas)
 	end
+	if type(raw.rebirths) == "number" and raw.rebirths >= 0 then
+		state.rebirths = math.floor(raw.rebirths)
+	end
+	if type(raw.sprinkles) == "number" and raw.sprinkles >= 0 then
+		state.sprinkles = math.floor(raw.sprinkles)
+	end
+
+	-- Upgrades are read before `carried`, because carry capacity depends on them.
+	if type(raw.upgrades) == "table" then
+		for _, upgrade in GameConfig.Upgrades do
+			local level = raw.upgrades[upgrade.Id]
+			if type(level) == "number" and level >= 0 then
+				state.upgrades[upgrade.Id] = math.min(math.floor(level), upgrade.MaxLevel)
+			end
+		end
+	end
+
 	if type(raw.carried) == "number" and raw.carried >= 0 then
-		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state.maxArea))
+		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state))
 	end
 	if type(raw.fed) == "table" then
 		for i = 1, #GameConfig.Areas do

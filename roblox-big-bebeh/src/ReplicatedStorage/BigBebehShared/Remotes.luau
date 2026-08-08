@@ -13,6 +13,8 @@ local REMOTE_NAMES = {
 	"Toast", -- server -> client: a short message for the notification stack
 	"CookiePop", -- server -> client: "+N" floating text at a world position
 	"FeedBurst", -- server -> client: make a Bebeh bounce and spit crumbs
+	"BuyUpgrade", -- client -> server: "I want the next level of this upgrade"
+	"Rebirth", -- client -> server: "start me over for the multiplier"
 }
 
 local folder: Folder

@@ -32,8 +32,16 @@ local GameConfig = {}
 
 -- Saving -------------------------------------------------------------------
 GameConfig.SaveEnabled = true
-GameConfig.DataStoreName = "BigBebehCookies_v1"
+GameConfig.DataStoreName = "BigBebehCookies_v2"
 GameConfig.AutosaveInterval = 120
+
+-- Big Bebeh's look ---------------------------------------------------------
+-- Leave this empty to use the part-built Bebeh. To use your own artwork,
+-- upload the picture to Roblox (Create → Decals), then paste its id here as
+-- "rbxassetid://0000000000" and every Bebeh becomes a cutout of your image.
+-- A Model named "BigBebeh" in ServerStorage beats both of these.
+GameConfig.BebehImageId = ""
+GameConfig.BebehImageAspect = 1152 / 1320 -- width / height of the artwork
 
 -- Gameplay tuning ----------------------------------------------------------
 GameConfig.FeedRadius = 16 -- studs; walk this close to Big Bebeh to auto-feed
@@ -41,6 +49,7 @@ GameConfig.FeedInterval = 0.3 -- seconds between auto-feed checks
 GameConfig.CookieRespawnTime = 5 -- seconds before a picked-up cookie comes back
 GameConfig.CollectRange = 14 -- server-side sanity check on pickups
 GameConfig.VoidY = -60 -- fall below this and you get placed back on your area
+GameConfig.MagnetInterval = 0.15 -- seconds between magnet sweeps
 
 -- World layout -------------------------------------------------------------
 GameConfig.PlatformSize = Vector3.new(220, 6, 220)
@@ -49,7 +58,8 @@ GameConfig.BridgeWidth = 26
 
 -- Areas --------------------------------------------------------------------
 -- Feed the Bebeh in area N its HungerGoal to unlock area N + 1.
--- CarryCapacity is how many cookies you can hold once that area is unlocked.
+-- CarryCapacity is the base hand size once that area is unlocked; the
+-- Bigger Hands upgrade multiplies it.
 GameConfig.Areas = {
 	{
 		Name = "Cookie Nursery",
@@ -113,15 +123,132 @@ GameConfig.Areas = {
 	},
 }
 
+-- Upgrades -----------------------------------------------------------------
+-- Bought with Sprinkles, which you earn by feeding Big Bebeh.
+GameConfig.SprinklesPerCookieFed = 1
+
+GameConfig.BaseWalkSpeed = 16
+GameConfig.CapacityPerLevel = 0.2 -- +20% of the area's base capacity per level
+GameConfig.SpeedPerLevel = 2 -- +2 walk speed per level
+GameConfig.MagnetBaseRadius = 9 -- radius at level 1
+GameConfig.MagnetPerLevel = 2.5 -- extra radius for each level after the first
+GameConfig.LuckPerLevel = 0.05 -- +5% chance of a double-value cookie per level
+
+GameConfig.Upgrades = {
+	{
+		Id = "Capacity",
+		Name = "Bigger Hands",
+		Icon = "🧤",
+		Blurb = "Carry more cookies each trip",
+		MaxLevel = 20,
+		BaseCost = 40,
+		CostMultiplier = 1.42,
+	},
+	{
+		Id = "Speed",
+		Name = "Sugar Rush",
+		Icon = "👟",
+		Blurb = "Run faster between cookies",
+		MaxLevel = 15,
+		BaseCost = 60,
+		CostMultiplier = 1.5,
+	},
+	{
+		Id = "Magnet",
+		Name = "Cookie Magnet",
+		Icon = "🧲",
+		Blurb = "Suck up cookies without touching them",
+		MaxLevel = 12,
+		BaseCost = 120,
+		CostMultiplier = 1.55,
+	},
+	{
+		Id = "Luck",
+		Name = "Double Chip",
+		Icon = "🍀",
+		Blurb = "Chance for a cookie to count twice",
+		MaxLevel = 10,
+		BaseCost = 200,
+		CostMultiplier = 1.6,
+	},
+}
+
+-- Rebirth ------------------------------------------------------------------
+-- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
+-- upgrade and sprinkle, plus a permanent multiplier on everything you collect.
+GameConfig.RebirthMultiplierPerLevel = 0.5
+GameConfig.RebirthSprinkleBonus = 2500
+
 -- Helpers ------------------------------------------------------------------
 
 function GameConfig.getAreaCenter(areaIndex: number): Vector3
 	return Vector3.new((areaIndex - 1) * GameConfig.AreaSpacing, 0, 0)
 end
 
-function GameConfig.getCapacity(maxArea: number): number
-	local area = GameConfig.Areas[math.clamp(maxArea, 1, #GameConfig.Areas)]
-	return area.CarryCapacity
+function GameConfig.getUpgrade(id: string)
+	for _, upgrade in GameConfig.Upgrades do
+		if upgrade.Id == id then
+			return upgrade
+		end
+	end
+	return nil
+end
+
+function GameConfig.getUpgradeLevel(state: any, id: string): number
+	return (state.upgrades and state.upgrades[id]) or 0
+end
+
+-- Cost of the NEXT level, given how many you already own.
+function GameConfig.getUpgradeCost(upgrade: any, currentLevel: number): number
+	return math.floor(upgrade.BaseCost * upgrade.CostMultiplier ^ currentLevel)
+end
+
+function GameConfig.getCapacity(state: any): number
+	local area = GameConfig.Areas[math.clamp(state.maxArea or 1, 1, #GameConfig.Areas)]
+	local level = GameConfig.getUpgradeLevel(state, "Capacity")
+	return math.floor(area.CarryCapacity * (1 + GameConfig.CapacityPerLevel * level))
+end
+
+function GameConfig.getWalkSpeed(state: any): number
+	return GameConfig.BaseWalkSpeed + GameConfig.SpeedPerLevel * GameConfig.getUpgradeLevel(state, "Speed")
+end
+
+-- Level 0 means no magnet at all.
+function GameConfig.getMagnetRadius(state: any): number
+	local level = GameConfig.getUpgradeLevel(state, "Magnet")
+	if level <= 0 then
+		return 0
+	end
+	return GameConfig.MagnetBaseRadius + GameConfig.MagnetPerLevel * (level - 1)
+end
+
+function GameConfig.getLuckChance(state: any): number
+	return math.min(1, GameConfig.LuckPerLevel * GameConfig.getUpgradeLevel(state, "Luck"))
+end
+
+function GameConfig.getRebirthMultiplier(state: any): number
+	return 1 + GameConfig.RebirthMultiplierPerLevel * (state.rebirths or 0)
+end
+
+function GameConfig.canRebirth(state: any): boolean
+	local last = #GameConfig.Areas
+	return (state.fed and state.fed[last] or 0) >= GameConfig.Areas[last].HungerGoal
+end
+
+-- Short "what does this level do" text for the shop.
+function GameConfig.describeUpgrade(state: any, upgrade: any): string
+	local level = GameConfig.getUpgradeLevel(state, upgrade.Id)
+	if upgrade.Id == "Capacity" then
+		return `Hands: {GameConfig.abbreviate(GameConfig.getCapacity(state))}`
+	elseif upgrade.Id == "Speed" then
+		return `Speed: {GameConfig.getWalkSpeed(state)}`
+	elseif upgrade.Id == "Magnet" then
+		local radius = GameConfig.getMagnetRadius(state)
+		return radius > 0 and `Reach: {math.floor(radius)} studs` or "Not bought yet"
+	elseif upgrade.Id == "Luck" then
+		return `Double chance: {math.floor(GameConfig.getLuckChance(state) * 100)}%`
+	end
+	return `Level {level}`
 end
 
 -- Turns 45000 into "45K" so the HUD never overflows.
@@ -164,6 +291,8 @@ local REMOTE_NAMES = {
 	"Toast", -- server -> client: a short message for the notification stack
 	"CookiePop", -- server -> client: "+N" floating text at a world position
 	"FeedBurst", -- server -> client: make a Bebeh bounce and spit crumbs
+	"BuyUpgrade", -- client -> server: "I want the next level of this upgrade"
+	"Rebirth", -- client -> server: "start me over for the multiplier"
 }
 
 local folder: Folder
@@ -211,8 +340,11 @@ return Remotes
 	The loop:
 	  1. Cookies lie around each area. Walk over one to pick it up.
 	  2. Your hands only hold so many; when they are full, go feed Big Bebeh.
-	  3. Stand on his pad and he eats everything you are carrying.
+	  3. Stand on his pad and he eats everything you are carrying, paying out
+	     Sprinkles as he goes.
 	  4. Fill his hunger bar and the gate to the next area opens for you.
+	  5. Spend Sprinkles at the shop on hands, speed, magnet and luck.
+	  6. Once BIG BEBEH is full, rebirth for a permanent multiplier.
 
 	All tuning lives in ReplicatedStorage/BigBebehShared/GameConfig.
 ]]
@@ -228,13 +360,19 @@ local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
 
 local COOKIE_COLOR = Color3.fromRGB(255, 226, 140)
+local LUCKY_COLOR = Color3.fromRGB(150, 255, 170)
 local UNLOCK_COLOR = Color3.fromRGB(140, 255, 170)
+local SPRINKLE_COLOR = Color3.fromRGB(255, 150, 220)
+local DENY_COLOR = Color3.fromRGB(255, 150, 130)
 
 local world = WorldBuilder.build()
 
 local cookiePool = Instance.new("Folder")
 cookiePool.Name = "CookiePool"
 cookiePool.Parent = ServerStorage
+
+-- Cookies grouped by area, so the magnet only ever scans one platform's worth.
+local cookiesByArea: { [number]: { Model } } = {}
 
 -- Cookie spawning ----------------------------------------------------------
 
@@ -325,6 +463,14 @@ local function toast(player: Player, message: string, color: Color3?, throttleSe
 	Remotes.Toast:FireClient(player, message, color or Color3.fromRGB(255, 255, 255))
 end
 
+local function applyWalkSpeed(player: Player, state: any)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.WalkSpeed = GameConfig.getWalkSpeed(state)
+	end
+end
+
 local function sync(player: Player)
 	local state = PlayerState.get(player)
 	if not state then
@@ -334,16 +480,20 @@ local function sync(player: Player)
 	local stats = player:FindFirstChild("leaderstats")
 	if stats then
 		stats.Cookies.Value = state.carried
-		stats.Fed.Value = state.totalFed
+		stats.Sprinkles.Value = state.sprinkles
 		stats.Area.Value = state.maxArea
+		stats.Rebirths.Value = state.rebirths
 	end
 
 	Remotes.SyncState:FireClient(player, {
 		maxArea = state.maxArea,
 		carried = state.carried,
-		capacity = GameConfig.getCapacity(state.maxArea),
+		capacity = GameConfig.getCapacity(state),
 		fed = state.fed,
 		totalFed = state.totalFed,
+		sprinkles = state.sprinkles,
+		upgrades = state.upgrades,
+		rebirths = state.rebirths,
 	})
 end
 
@@ -363,7 +513,8 @@ end
 
 -- Collecting ---------------------------------------------------------------
 
-local function collect(player: Player, model: Model)
+-- `allowedRange` lets the magnet reach further than a plain footstep pickup.
+local function collect(player: Player, model: Model, allowedRange: number?)
 	local state = PlayerState.get(player)
 	if not state then
 		return
@@ -375,7 +526,7 @@ local function collect(player: Player, model: Model)
 		return
 	end
 
-	local capacity = GameConfig.getCapacity(state.maxArea)
+	local capacity = GameConfig.getCapacity(state)
 	if state.carried >= capacity then
 		toast(player, "Hands full! Go feed Big Bebeh 🍪", Color3.fromRGB(255, 180, 120), 3)
 		return
@@ -386,15 +537,25 @@ local function collect(player: Player, model: Model)
 	if not root or not model.PrimaryPart then
 		return
 	end
-	if (root.Position - model.PrimaryPart.Position).Magnitude > GameConfig.CollectRange then
+	if (root.Position - model.PrimaryPart.Position).Magnitude > (allowedRange or GameConfig.CollectRange) then
 		return
 	end
 
-	local value = model:GetAttribute("Value") :: number
-	local gained = math.min(value, capacity - state.carried)
+	local value = (model:GetAttribute("Value") :: number) * GameConfig.getRebirthMultiplier(state)
+	local lucky = math.random() < GameConfig.getLuckChance(state)
+	if lucky then
+		value *= 2
+	end
+
+	local gained = math.min(math.floor(value), capacity - state.carried)
 	state.carried += gained
 
-	Remotes.CookiePop:FireClient(player, model.PrimaryPart.Position, `+{GameConfig.abbreviate(gained)}`, COOKIE_COLOR)
+	Remotes.CookiePop:FireClient(
+		player,
+		model.PrimaryPart.Position,
+		lucky and `+{GameConfig.abbreviate(gained)} x2!` or `+{GameConfig.abbreviate(gained)}`,
+		lucky and LUCKY_COLOR or COOKIE_COLOR
+	)
 	sync(player)
 
 	-- Hide it, then bring it back somewhere else on the same platform.
@@ -425,12 +586,51 @@ local function armCookie(model: Model)
 end
 
 for areaIndex = 1, #GameConfig.Areas do
+	cookiesByArea[areaIndex] = {}
 	for _ = 1, GameConfig.Areas[areaIndex].CookieCount do
 		local cookie = createCookie(areaIndex)
 		placeCookie(cookie)
 		armCookie(cookie)
+		table.insert(cookiesByArea[areaIndex], cookie)
 	end
 end
+
+-- Magnet -------------------------------------------------------------------
+
+task.spawn(function()
+	while true do
+		task.wait(GameConfig.MagnetInterval)
+		for player, state in PlayerState.all() do
+			local radius = GameConfig.getMagnetRadius(state)
+			if radius <= 0 then
+				continue
+			end
+
+			local character = player.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			if not root or state.carried >= GameConfig.getCapacity(state) then
+				continue
+			end
+
+			local areaIndex = areaAtPosition(root.Position)
+			if areaIndex > state.maxArea then
+				continue
+			end
+
+			for _, cookie in cookiesByArea[areaIndex] do
+				if cookie.Parent ~= world.cookiesFolder or not cookie.PrimaryPart then
+					continue
+				end
+				if (cookie.PrimaryPart.Position - root.Position).Magnitude <= radius then
+					collect(player, cookie, radius + 6)
+					if state.carried >= GameConfig.getCapacity(state) then
+						break
+					end
+				end
+			end
+		end
+	end
+end)
 
 -- Feeding ------------------------------------------------------------------
 
@@ -456,18 +656,29 @@ local function feed(player: Player, areaIndex: number)
 	state.fed[areaIndex] += amount
 	state.totalFed += amount
 
+	local earned = math.floor(amount * GameConfig.SprinklesPerCookieFed * GameConfig.getRebirthMultiplier(state))
+	state.sprinkles += earned
+
 	local bebeh = bebehs[areaIndex]
 	if bebeh then
 		Remotes.FeedBurst:FireClient(player, bebeh, amount)
+		if earned > 0 then
+			Remotes.CookiePop:FireClient(
+				player,
+				bebeh:GetPivot().Position,
+				`+{GameConfig.abbreviate(earned)} ✨`,
+				SPRINKLE_COLOR
+			)
+		end
 	end
 
 	if state.fed[areaIndex] >= cfg.HungerGoal then
 		if areaIndex < #GameConfig.Areas and state.maxArea == areaIndex then
 			state.maxArea = areaIndex + 1
 			local nextCfg = GameConfig.Areas[state.maxArea]
-			toast(player, `🎉 {nextCfg.Name} unlocked! Carry up to {GameConfig.abbreviate(nextCfg.CarryCapacity)}`, UNLOCK_COLOR)
+			toast(player, `🎉 {nextCfg.Name} unlocked!`, UNLOCK_COLOR)
 		elseif areaIndex == #GameConfig.Areas then
-			toast(player, "🏆 BIG BEBEH IS FULL. You win! 🏆", UNLOCK_COLOR)
+			toast(player, "🏆 BIG BEBEH IS FULL — rebirth is ready!", UNLOCK_COLOR)
 		end
 	end
 
@@ -509,6 +720,65 @@ task.spawn(function()
 	end
 end)
 
+-- Shop and rebirth ---------------------------------------------------------
+
+Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
+	if type(upgradeId) ~= "string" then
+		return
+	end
+	local state = PlayerState.get(player)
+	local upgrade = GameConfig.getUpgrade(upgradeId)
+	if not state or not upgrade then
+		return
+	end
+
+	local level = GameConfig.getUpgradeLevel(state, upgradeId)
+	if level >= upgrade.MaxLevel then
+		toast(player, `{upgrade.Name} is already maxed out!`, DENY_COLOR, 1)
+		return
+	end
+
+	local cost = GameConfig.getUpgradeCost(upgrade, level)
+	if state.sprinkles < cost then
+		toast(player, `Need {GameConfig.abbreviate(cost - state.sprinkles)} more sprinkles`, DENY_COLOR, 1)
+		return
+	end
+
+	state.sprinkles -= cost
+	state.upgrades[upgradeId] = level + 1
+	applyWalkSpeed(player, state)
+	toast(player, `{upgrade.Icon} {upgrade.Name} → level {level + 1}`, SPRINKLE_COLOR)
+	sync(player)
+end)
+
+Remotes.Rebirth.OnServerEvent:Connect(function(player)
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+	if not GameConfig.canRebirth(state) then
+		toast(player, "Fill BIG BEBEH first to rebirth!", DENY_COLOR, 1)
+		return
+	end
+
+	state.rebirths += 1
+	state.maxArea = 1
+	state.carried = 0
+	for i = 1, #GameConfig.Areas do
+		state.fed[i] = 0
+	end
+	state.sprinkles += GameConfig.RebirthSprinkleBonus
+
+	teleportToArea(player, 1)
+	applyWalkSpeed(player, state)
+	toast(
+		player,
+		`⭐ Rebirth {state.rebirths}! Everything you collect is now x{GameConfig.getRebirthMultiplier(state)}`,
+		UNLOCK_COLOR
+	)
+	sync(player)
+end)
+
 -- Players ------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
@@ -516,7 +786,7 @@ local function onPlayerAdded(player: Player)
 
 	local stats = Instance.new("Folder")
 	stats.Name = "leaderstats"
-	for _, name in { "Cookies", "Fed", "Area" } do
+	for _, name in { "Cookies", "Sprinkles", "Area", "Rebirths" } do
 		local value = Instance.new("IntValue")
 		value.Name = name
 		value.Parent = stats
@@ -525,9 +795,11 @@ local function onPlayerAdded(player: Player)
 
 	player.CharacterAdded:Connect(function()
 		task.wait(0.5)
+		applyWalkSpeed(player, state)
 		sync(player)
 	end)
 
+	applyWalkSpeed(player, state)
 	sync(player)
 	toast(player, `Welcome! Collect cookies and feed {GameConfig.Areas[state.maxArea].BebehName}.`, COOKIE_COLOR)
 end
@@ -572,10 +844,13 @@ end)
 	Per-player progress, with optional DataStore persistence.
 
 	state = {
-		maxArea  = 1,          -- highest area unlocked
-		carried  = 0,          -- cookies currently in hand
-		fed      = { 12, 0 },  -- cookies fed to each area's Bebeh
-		totalFed = 12,
+		maxArea   = 1,          -- highest area unlocked
+		carried   = 0,          -- cookies currently in hand
+		fed       = { 12, 0 },  -- cookies fed to each area's Bebeh
+		totalFed  = 12,
+		sprinkles = 340,        -- upgrade currency, earned by feeding
+		upgrades  = { Capacity = 3, Speed = 1 },
+		rebirths  = 0,
 	}
 ]]
 
@@ -601,12 +876,18 @@ if GameConfig.SaveEnabled then
 end
 
 local function defaultState()
-	local fed = table.create(#GameConfig.Areas, 0)
+	local upgrades = {}
+	for _, upgrade in GameConfig.Upgrades do
+		upgrades[upgrade.Id] = 0
+	end
 	return {
 		maxArea = 1,
 		carried = 0,
-		fed = fed,
+		fed = table.create(#GameConfig.Areas, 0),
 		totalFed = 0,
+		sprinkles = 0,
+		upgrades = upgrades,
+		rebirths = 0,
 	}
 end
 
@@ -621,8 +902,25 @@ local function sanitize(raw: any)
 	if type(raw.maxArea) == "number" then
 		state.maxArea = math.clamp(math.floor(raw.maxArea), 1, #GameConfig.Areas)
 	end
+	if type(raw.rebirths) == "number" and raw.rebirths >= 0 then
+		state.rebirths = math.floor(raw.rebirths)
+	end
+	if type(raw.sprinkles) == "number" and raw.sprinkles >= 0 then
+		state.sprinkles = math.floor(raw.sprinkles)
+	end
+
+	-- Upgrades are read before `carried`, because carry capacity depends on them.
+	if type(raw.upgrades) == "table" then
+		for _, upgrade in GameConfig.Upgrades do
+			local level = raw.upgrades[upgrade.Id]
+			if type(level) == "number" and level >= 0 then
+				state.upgrades[upgrade.Id] = math.min(math.floor(level), upgrade.MaxLevel)
+			end
+		end
+	end
+
 	if type(raw.carried) == "number" and raw.carried >= 0 then
-		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state.maxArea))
+		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state))
 	end
 	if type(raw.fed) == "table" then
 		for i = 1, #GameConfig.Areas do
@@ -752,6 +1050,61 @@ local function makeSign(text: string, size: UDim2, adornee: BasePart, offsetY: n
 	return billboard
 end
 
+-- A little market stall where Sprinkles get spent.
+local function buildShop(center: Vector3, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "Shop"
+	folder.Parent = parent
+
+	local base = center + Vector3.new(62, 0, 62)
+
+	makeAnchoredPart("Counter", Vector3.new(16, 6, 6), CFrame.new(base + Vector3.new(0, 3, 0)), Color3.fromRGB(168, 128, 92), folder).Material =
+		Enum.Material.WoodPlanks
+	for _, side in { -1, 1 } do
+		makeAnchoredPart(
+			"Post",
+			Vector3.new(1.2, 14, 1.2),
+			CFrame.new(base + Vector3.new(side * 7, 7, -2.6)),
+			Color3.fromRGB(140, 104, 74),
+			folder
+		)
+	end
+
+	-- Striped awning.
+	for i = -3, 3 do
+		makeAnchoredPart(
+			"Awning",
+			Vector3.new(2.4, 0.6, 9),
+			CFrame.new(base + Vector3.new(i * 2.4, 14.5, 0)) * CFrame.Angles(math.rad(-16), 0, 0),
+			(i % 2 == 0) and Color3.fromRGB(240, 96, 110) or Color3.fromRGB(250, 246, 238),
+			folder
+		)
+	end
+
+	local sign = makeAnchoredPart(
+		"ShopSign",
+		Vector3.new(1, 1, 1),
+		CFrame.new(base + Vector3.new(0, 19, 0)),
+		cfg.AccentColor,
+		folder
+	)
+	sign.Transparency = 1
+	sign.CanCollide = false
+	makeSign("🛒 UPGRADE SHOP", UDim2.fromScale(16, 4), sign, 0)
+
+	-- Walking up opens the same panel as the on-screen button.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.ActionText = "Open shop"
+	prompt.ObjectText = "Upgrades"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.RequiresLineOfSight = false
+	prompt.MaxActivationDistance = 16
+	prompt.Parent = folder:FindFirstChild("Counter")
+	CollectionService:AddTag(prompt, "ShopPrompt")
+
+	return folder
+end
+
 -- One platform, its fence, its name sign and its Bebeh.
 local function buildArea(areaIndex: number, parent: Instance)
 	local cfg = GameConfig.Areas[areaIndex]
@@ -853,6 +1206,8 @@ local function buildArea(areaIndex: number, parent: Instance)
 	pad.CanTouch = false
 	pad.Material = Enum.Material.Neon
 	pad.Transparency = 0.6
+
+	buildShop(center, cfg, folder)
 
 	return { folder = folder, bebeh = bebeh, center = center }
 end
@@ -971,143 +1326,284 @@ return WorldBuilder
 <ProtectedString name="Source"><![CDATA[
 --[[
 	BebehBuilder
-	Builds Big Bebeh out of parts: a chunky brown cube head, floppy yellow bunny
-	ears, sleepy closed eyes, blushy cheeks, a blue bib and a big blue pacifier.
+	Builds Big Bebeh: a chunky rounded brown head, long floppy yellow ears,
+	sleepy arced eyes, blushy cheeks, a blue bib and a big blue pacifier.
 
-	Want your own model instead? Drop a Model named "BigBebeh" into ServerStorage
-	and this module will clone and scale that instead of building the blocky one.
+	Three ways to get a Bebeh, in priority order:
+	  1. A Model named "BigBebeh" in ServerStorage — cloned and scaled.
+	  2. GameConfig.BebehImageId — a flat cutout of your own artwork.
+	  3. Otherwise, the part-built one below.
+
+	Roblox has no rounded-box primitive, so the chunky shapes here are built the
+	way modelling packages do it: a core of slabs, cylinders along the edges and
+	spheres at the corners. That is what stops him reading as a stack of bricks.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+
+local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 
 local BebehBuilder = {}
 
-local BROWN = Color3.fromRGB(150, 108, 74)
-local DARK_BROWN = Color3.fromRGB(118, 82, 55)
-local EAR_YELLOW = Color3.fromRGB(248, 226, 74)
-local BIB_BLUE = Color3.fromRGB(150, 215, 240)
-local PACI_BLUE = Color3.fromRGB(86, 150, 240)
+local BROWN = Color3.fromRGB(156, 112, 76)
+local BROWN_DARK = Color3.fromRGB(120, 84, 56)
+local EAR_YELLOW = Color3.fromRGB(250, 226, 72)
+local EAR_YELLOW_DARK = Color3.fromRGB(222, 196, 48)
+local BIB_BLUE = Color3.fromRGB(152, 216, 240)
+local BIB_BLUE_LIGHT = Color3.fromRGB(196, 234, 250)
+local PACI_BLUE = Color3.fromRGB(88, 152, 242)
 local PACI_PURPLE = Color3.fromRGB(150, 120, 226)
-local BLUSH = Color3.fromRGB(240, 140, 140)
-local DIAPER = Color3.fromRGB(245, 243, 236)
+local BLUSH = Color3.fromRGB(238, 138, 138)
+local DIAPER = Color3.fromRGB(246, 244, 238)
+local INK = Color3.fromRGB(18, 16, 16)
 
-local function makePart(name: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?): Part
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Size = size
-	p.CFrame = cf
-	p.Color = color
-	p.Shape = shape or Enum.PartType.Block
-	p.Anchored = true
-	p.CanCollide = false
-	p.CanTouch = false
-	p.CanQuery = false
-	p.Material = Enum.Material.SmoothPlastic
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	return p
-end
-
--- The model is authored around the origin facing -Z (Roblox's "forward").
-local function buildBlockyBebeh(scale: number): Model
-	local model = Instance.new("Model")
+--[[
+	Collects parts as we go. Every piece is authored around the origin with the
+	face pointing down -Z, then the whole model is moved into place at the end.
+]]
+local function newBuilder(scale: number)
+	local pieces: { Part } = {}
 
 	local function s(n: number)
 		return n * scale
 	end
-	local function v(x: number, y: number, z: number)
-		return Vector3.new(s(x), s(y), s(z))
-	end
-	local function at(x: number, y: number, z: number)
-		return CFrame.new(s(x), s(y), s(z))
-	end
 
-	local pieces = {}
-	local function add(p: Part)
+	local function add(name: string, size: Vector3, cf: CFrame, color: Color3, shape: Enum.PartType?, material: Enum.Material?): Part
+		local p = Instance.new("Part")
+		p.Name = name
+		p.Size = size
+		p.CFrame = cf
+		p.Color = color
+		p.Shape = shape or Enum.PartType.Block
+		p.Material = material or Enum.Material.SmoothPlastic
+		p.Anchored = true
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		p.TopSurface = Enum.SurfaceType.Smooth
+		p.BottomSurface = Enum.SurfaceType.Smooth
 		table.insert(pieces, p)
 		return p
 	end
 
-	-- Head ------------------------------------------------------------------
-	local head = add(makePart("Head", v(14, 13, 13), at(0, 0, 0), BROWN))
-	head.CanCollide = true
-	head.CanQuery = true
-	model.PrimaryPart = head
+	-- A box with every edge and corner rounded off: 3 slabs + 12 edges + 8 corners.
+	local function roundedBox(name: string, size: Vector3, cf: CFrame, color: Color3, radius: number, material: Enum.Material?)
+		local r = math.min(radius, size.X / 2, size.Y / 2, size.Z / 2)
+		local ix, iy, iz = size.X - 2 * r, size.Y - 2 * r, size.Z - 2 * r
+		local d = r * 2
 
-	-- The darker band and yellow stripe running down his left side.
-	add(makePart("SideShade", v(0.3, 13.1, 13.1), at(-6.9, 0, 0), DARK_BROWN))
-	add(makePart("Stripe", v(0.35, 13.15, 3.2), at(-7.0, 0, 1.2), EAR_YELLOW))
+		add(name, Vector3.new(size.X, iy, iz), cf, color, nil, material)
+		add(name, Vector3.new(ix, size.Y, iz), cf, color, nil, material)
+		add(name, Vector3.new(ix, iy, size.Z), cf, color, nil, material)
 
-	-- Ears ------------------------------------------------------------------
-	-- Long floppy bunny ears splayed out in a V above the head.
-	for _, side in { -1, 1 } do
-		local ear = add(makePart("Ear", v(2.4, 13, 1.1), CFrame.new(), EAR_YELLOW))
-		ear.CFrame = at(side * 3.2, 6.5, 0.5)
-			* CFrame.Angles(math.rad(-8), 0, math.rad(side * 38))
-			* CFrame.new(0, s(6), 0)
-	end
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				-- Edges running along X, then Y, then Z.
+				add(name, Vector3.new(ix, d, d), cf * CFrame.new(0, a * iy / 2, b * iz / 2), color, Enum.PartType.Cylinder, material)
+				add(
+					name,
+					Vector3.new(iy, d, d),
+					cf * CFrame.new(a * ix / 2, 0, b * iz / 2) * CFrame.Angles(0, 0, math.rad(90)),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+				add(
+					name,
+					Vector3.new(iz, d, d),
+					cf * CFrame.new(a * ix / 2, b * iy / 2, 0) * CFrame.Angles(0, math.rad(90), 0),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+			end
+		end
 
-	-- Eyes ------------------------------------------------------------------
-	-- Sleepy closed eyes: two strokes per eye meeting at the bottom.
-	local faceZ = -6.6
-	for _, side in { -1, 1 } do
-		for _, lash in { -1, 1 } do
-			add(makePart(
-				"Eye",
-				v(0.55, 3.6, 0.35),
-				at(side * 3.6 + lash * 1.05, 2.6, faceZ) * CFrame.Angles(0, 0, math.rad(lash * -22)),
-				Color3.fromRGB(15, 15, 15)
-			))
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				for _, c in { -1, 1 } do
+					add(
+						name,
+						Vector3.new(d, d, d),
+						cf * CFrame.new(a * ix / 2, b * iy / 2, c * iz / 2),
+						color,
+						Enum.PartType.Ball,
+						material
+					)
+				end
+			end
 		end
 	end
 
-	-- Blushy cheeks ---------------------------------------------------------
-	for _, side in { -1, 1 } do
-		local cheek = add(makePart("Blush", v(3.4, 2.2, 1), at(side * 4.6, -0.6, faceZ + 0.1), BLUSH, Enum.PartType.Ball))
-		cheek.Transparency = 0.35
+	-- A flat slab with only its outline rounded — for ears, bibs and stripes.
+	local function roundedPlate(name: string, size: Vector3, cf: CFrame, color: Color3, radius: number, material: Enum.Material?)
+		local r = math.min(radius, size.X / 2, size.Y / 2)
+		local ix, iy = size.X - 2 * r, size.Y - 2 * r
+		local d = r * 2
+
+		add(name, Vector3.new(size.X, iy, size.Z), cf, color, nil, material)
+		add(name, Vector3.new(ix, size.Y, size.Z), cf, color, nil, material)
+		for _, a in { -1, 1 } do
+			for _, b in { -1, 1 } do
+				add(
+					name,
+					Vector3.new(size.Z, d, d),
+					cf * CFrame.new(a * ix / 2, b * iy / 2, 0) * CFrame.Angles(0, math.rad(90), 0),
+					color,
+					Enum.PartType.Cylinder,
+					material
+				)
+			end
+		end
 	end
 
-	-- Bib -------------------------------------------------------------------
-	add(makePart("Bib", v(12.6, 4.2, 0.7), at(0, -4.4, faceZ - 0.1), BIB_BLUE))
-	add(makePart("BibLeft", v(2.6, 3.2, 0.7), at(-6.6, -2.6, faceZ - 0.1), BIB_BLUE))
-	add(makePart("BibRight", v(2.6, 3.2, 0.7), at(6.6, -2.6, faceZ - 0.1), BIB_BLUE))
-	-- Little bow in the middle of the bib.
+	return {
+		pieces = pieces,
+		s = s,
+		add = add,
+		roundedBox = roundedBox,
+		roundedPlate = roundedPlate,
+	}
+end
+
+local function buildBlockyBebeh(scale: number): Model
+	local model = Instance.new("Model")
+	local b = newBuilder(scale)
+	local s, add = b.s, b.add
+
+	local function at(x: number, y: number, z: number)
+		return CFrame.new(s(x), s(y), s(z))
+	end
+	local function v(x: number, y: number, z: number)
+		return Vector3.new(s(x), s(y), s(z))
+	end
+
+	local faceZ = -6.5 -- the front plane of the head
+
+	-- Head -------------------------------------------------------------------
+	b.roundedBox("Head", v(14, 13, 13), at(0, 0, 0), BROWN, s(2.6))
+
+	-- Shading down his left side, and the yellow stripe from the reference.
+	b.roundedPlate("SideShade", v(9, 11, 0.4), at(-7.05, 0, 0) * CFrame.Angles(0, math.rad(90), 0), BROWN_DARK, s(1.5))
+	b.roundedPlate("Stripe", v(9.4, 3.2, 0.4), at(-7.15, 0.4, 0.6) * CFrame.Angles(0, math.rad(90), 0), EAR_YELLOW, s(1.4))
+
+	-- Ears -------------------------------------------------------------------
+	-- Two segments each so they taper and flop outward instead of standing stiff.
 	for _, side in { -1, 1 } do
-		add(makePart(
+		local root = at(side * 3.4, 6.2, 0.4) * CFrame.Angles(math.rad(-10), 0, math.rad(side * 34))
+		b.roundedPlate("Ear", v(3.4, 9, 1.1), root * CFrame.new(0, s(4.2), 0), EAR_YELLOW, s(1.5))
+		-- The outer half bends a little further out, giving the floppy silhouette.
+		local tip = root * CFrame.new(0, s(8.4), 0) * CFrame.Angles(0, 0, math.rad(side * 12))
+		b.roundedPlate("EarTip", v(2.6, 7, 1.05), tip * CFrame.new(0, s(3.2), 0), EAR_YELLOW, s(1.2))
+		b.roundedPlate("EarInner", v(1.5, 5.2, 0.3), root * CFrame.new(0, s(4.6), s(-0.5)), EAR_YELLOW_DARK, s(0.7))
+	end
+
+	-- Eyes -------------------------------------------------------------------
+	-- Sleepy closed eyes, drawn as an arc of beads peaking in the middle.
+	for _, side in { -1, 1 } do
+		for i = 0, 6 do
+			local t = (i / 6) * 2 - 1
+			add(
+				"Eye",
+				v(0.9, 0.9, 0.5),
+				at(side * 3.7 + t * 2.0, 2.5 - 1.35 * t * t, faceZ - 0.05),
+				INK,
+				Enum.PartType.Ball
+			)
+		end
+	end
+
+	-- Blush ------------------------------------------------------------------
+	for _, side in { -1, 1 } do
+		local cheek = add("Blush", v(3.8, 2.3, 0.9), at(side * 4.7, -0.4, faceZ), BLUSH, Enum.PartType.Ball)
+		cheek.Transparency = 0.4
+	end
+
+	-- Bib --------------------------------------------------------------------
+	b.roundedPlate("Bib", v(13, 4.6, 0.8), at(0, -4.3, faceZ - 0.25), BIB_BLUE, s(2))
+	-- Shoulder straps sweeping up either side.
+	for _, side in { -1, 1 } do
+		b.roundedPlate(
+			"BibStrap",
+			v(3.4, 4.6, 0.8),
+			at(side * 6.1, -2.2, faceZ - 0.25) * CFrame.Angles(0, 0, math.rad(side * -28)),
+			BIB_BLUE,
+			s(1.4)
+		)
+	end
+	-- Bow.
+	for _, side in { -1, 1 } do
+		b.roundedPlate(
 			"BowLoop",
-			v(2.2, 1.6, 0.6),
-			at(side * 1.6, -5.6, faceZ - 0.5) * CFrame.Angles(0, 0, math.rad(side * 18)),
-			BIB_BLUE
-		))
+			v(2.6, 1.9, 0.7),
+			at(side * 1.9, -5.9, faceZ - 0.7) * CFrame.Angles(0, 0, math.rad(side * 20)),
+			BIB_BLUE_LIGHT,
+			s(0.85)
+		)
 	end
-	add(makePart("BowKnot", v(1.1, 1.1, 0.7), at(0, -5.5, faceZ - 0.6), Color3.fromRGB(180, 232, 248)))
+	add("BowKnot", v(1.3, 1.3, 1.3), at(0, -5.8, faceZ - 0.85), BIB_BLUE_LIGHT, Enum.PartType.Ball)
 
-	-- Pacifier --------------------------------------------------------------
-	add(makePart("PaciShield", v(5.4, 3.6, 1.6), at(0, -2.4, faceZ - 0.7), BIB_BLUE, Enum.PartType.Ball))
-	add(makePart("PaciKnob", v(2.8, 2.8, 2.4), at(0, -2.2, faceZ - 1.8), PACI_BLUE, Enum.PartType.Ball))
-	-- The ring is faked with eight short segments so it reads as a torus.
-	for i = 0, 7 do
-		local angle = (i / 8) * math.pi * 2
-		add(makePart(
+	-- Pacifier ---------------------------------------------------------------
+	add("PaciShield", v(6, 4, 1.8), at(0, -2.3, faceZ - 0.8), BIB_BLUE, Enum.PartType.Ball)
+	add("PaciKnob", v(3, 3, 2.6), at(0, -2.1, faceZ - 1.9), PACI_BLUE, Enum.PartType.Ball)
+	-- The ring is a circle of beads, which reads as a torus from any angle.
+	for i = 0, 11 do
+		local angle = (i / 12) * math.pi * 2
+		add(
 			"PaciRing",
-			v(0.85, 0.85, 1.7),
-			at(0, -3.6, faceZ - 2.4)
-				* CFrame.new(math.cos(angle) * s(1.7), math.sin(angle) * s(1.7), 0)
-				* CFrame.Angles(0, 0, angle),
-			PACI_PURPLE
-		))
+			v(1.05, 1.05, 1.05),
+			at(0, -3.5, faceZ - 2.7) * CFrame.new(math.cos(angle) * s(1.9), math.sin(angle) * s(1.9), 0),
+			PACI_PURPLE,
+			Enum.PartType.Ball
+		)
 	end
 
-	-- Diaper and feet -------------------------------------------------------
-	add(makePart("Diaper", v(13.4, 3.4, 13.4), at(0, -7.6, 0), DIAPER))
+	-- Body -------------------------------------------------------------------
+	b.roundedBox("Diaper", v(13.2, 4, 13.2), at(0, -7.8, 0), DIAPER, s(1.8))
 	for _, side in { -1, 1 } do
-		add(makePart("Foot", v(4, 2.6, 5.4), at(side * 3.6, -10, -1.6), BROWN))
+		add("Foot", v(4.4, 2.8, 5.8), at(side * 3.5, -10.2, -1.8), BROWN, Enum.PartType.Ball)
 	end
-	add(makePart("Tail", v(2.6, 2.6, 2.6), at(0, -8.6, 7), EAR_YELLOW, Enum.PartType.Ball))
+	add("Tail", v(3, 3, 3), at(0, -8.4, 7.2), EAR_YELLOW, Enum.PartType.Ball)
 
-	for _, p in pieces do
+	-- One invisible box does all the colliding, so players bump into a clean
+	-- shape instead of catching on ears and pacifier beads.
+	local collider = add("Collider", v(14.5, 22, 14), at(0, -4, 0), BROWN)
+	collider.Transparency = 1
+	collider.CanCollide = true
+	collider.CanQuery = true
+	model.PrimaryPart = collider
+
+	for _, p in b.pieces do
 		p.Parent = model
+	end
+	return model
+end
+
+-- A flat cutout of the user's own artwork, printed on both faces.
+local function buildImageBebeh(scale: number, imageId: string): Model
+	local model = Instance.new("Model")
+
+	local height = 24 * scale
+	local width = height * GameConfig.BebehImageAspect
+
+	local board = Instance.new("Part")
+	board.Name = "Bebeh"
+	board.Size = Vector3.new(width, height, 0.6)
+	board.CFrame = CFrame.new(0, 0, 0)
+	board.Anchored = true
+	board.CanCollide = true
+	board.CanTouch = false
+	board.Transparency = 1 -- decals still draw on an invisible part
+	board.Parent = model
+	model.PrimaryPart = board
+
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local decal = Instance.new("Decal")
+		decal.Texture = imageId
+		decal.Face = face
+		decal.Parent = board
 	end
 
 	return model
@@ -1132,6 +1628,8 @@ function BebehBuilder.build(areaIndex: number, areaConfig: any, pivot: CFrame): 
 		if not ok then
 			warn(`[BigBebeh] Could not scale ServerStorage.BigBebeh: {err}`)
 		end
+	elseif GameConfig.BebehImageId ~= "" then
+		model = buildImageBebeh(scale, GameConfig.BebehImageId)
 	else
 		model = buildBlockyBebeh(scale)
 	end
@@ -1229,9 +1727,9 @@ return BebehBuilder
 --[[
 	Big Bebeh — Cookie Collector (client)
 
-	Owns everything the player sees: the HUD, the spinning cookies, the gate that
-	dissolves once you have unlocked the area behind it, and the little bits of
-	juice (floating "+5", Bebeh bouncing when he eats, toast messages).
+	Owns everything the player sees: the HUD, the upgrade shop, the spinning
+	cookies, the gate that dissolves once you have unlocked the area behind it,
+	and the juice (floating "+5", Bebeh bouncing when he eats, toasts).
 
 	Gates are opened *locally*. The server decides whether you are allowed
 	through; this script just stops drawing a wall you have already earned.
@@ -1239,6 +1737,7 @@ return BebehBuilder
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -1253,7 +1752,10 @@ local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
 local COOKIE_YELLOW = Color3.fromRGB(255, 214, 120)
+local SPRINKLE_PINK = Color3.fromRGB(255, 150, 220)
 local PANEL_BG = Color3.fromRGB(28, 26, 38)
+local AFFORD_GREEN = Color3.fromRGB(80, 190, 120)
+local DENY_GREY = Color3.fromRGB(78, 74, 92)
 
 local state = {
 	maxArea = 1,
@@ -1261,9 +1763,12 @@ local state = {
 	capacity = GameConfig.Areas[1].CarryCapacity,
 	fed = table.create(#GameConfig.Areas, 0),
 	totalFed = 0,
+	sprinkles = 0,
+	upgrades = {},
+	rebirths = 0,
 }
 
--- HUD ----------------------------------------------------------------------
+-- UI helpers ---------------------------------------------------------------
 
 local function corner(parent: Instance, radius: number)
 	local c = Instance.new("UICorner")
@@ -1284,6 +1789,19 @@ local function newLabel(props: { [string]: any }): TextLabel
 	return label
 end
 
+local function newButton(props: { [string]: any }): TextButton
+	local button = Instance.new("TextButton")
+	button.Font = Enum.Font.FredokaOne
+	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextScaled = true
+	button.AutoButtonColor = true
+	button.BorderSizePixel = 0
+	for k, v in props do
+		(button :: any)[k] = v
+	end
+	return button
+end
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "BigBebehHUD"
 gui.ResetOnSpawn = false
@@ -1291,7 +1809,8 @@ gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
--- Area title, top centre.
+-- HUD ----------------------------------------------------------------------
+
 local areaTitle = newLabel({
 	Name = "AreaTitle",
 	AnchorPoint = Vector2.new(0.5, 0),
@@ -1302,6 +1821,40 @@ local areaTitle = newLabel({
 	TextStrokeTransparency = 0.35,
 })
 areaTitle.Parent = gui
+
+-- Sprinkle purse, top left.
+local purse = Instance.new("Frame")
+purse.Name = "Purse"
+purse.Position = UDim2.new(0, 14, 0, 14)
+purse.Size = UDim2.new(0, 190, 0, 42)
+purse.BackgroundColor3 = PANEL_BG
+purse.BackgroundTransparency = 0.15
+purse.BorderSizePixel = 0
+purse.Parent = gui
+corner(purse, 12)
+
+local sprinkleLabel = newLabel({
+	Name = "Sprinkles",
+	Position = UDim2.new(0, 12, 0, 6),
+	Size = UDim2.new(1, -24, 1, -12),
+	Font = Enum.Font.FredokaOne,
+	Text = "✨ 0",
+	TextColor3 = SPRINKLE_PINK,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+sprinkleLabel.Parent = purse
+
+local rebirthBadge = newLabel({
+	Name = "RebirthBadge",
+	Position = UDim2.new(0, 14, 0, 62),
+	Size = UDim2.new(0, 190, 0, 26),
+	Font = Enum.Font.GothamBold,
+	Text = "",
+	TextColor3 = Color3.fromRGB(255, 226, 130),
+	TextStrokeTransparency = 0.4,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+rebirthBadge.Parent = gui
 
 -- Toast stack, just under the title.
 local toastHolder = Instance.new("Frame")
@@ -1395,6 +1948,193 @@ local hintLabel = newLabel({
 })
 hintLabel.Parent = panel
 
+-- Shop ---------------------------------------------------------------------
+
+local shopButton = newButton({
+	Name = "ShopButton",
+	AnchorPoint = Vector2.new(1, 1),
+	Position = UDim2.new(1, -18, 1, -18),
+	Size = UDim2.new(0, 132, 0, 52),
+	BackgroundColor3 = Color3.fromRGB(236, 96, 140),
+	Text = "🛒 SHOP",
+})
+shopButton.Parent = gui
+corner(shopButton, 14)
+
+local shop = Instance.new("Frame")
+shop.Name = "Shop"
+shop.AnchorPoint = Vector2.new(0.5, 0.5)
+shop.Position = UDim2.new(0.5, 0, 0.5, 0)
+shop.Size = UDim2.new(0, 480, 0, 520)
+shop.BackgroundColor3 = PANEL_BG
+shop.BorderSizePixel = 0
+shop.Visible = false
+shop.Parent = gui
+corner(shop, 18)
+
+local shopTitle = newLabel({
+	Position = UDim2.new(0, 20, 0, 14),
+	Size = UDim2.new(1, -110, 0, 34),
+	Font = Enum.Font.FredokaOne,
+	Text = "🛒 Upgrade Shop",
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+shopTitle.Parent = shop
+
+local shopPurse = newLabel({
+	Position = UDim2.new(0, 20, 0, 50),
+	Size = UDim2.new(1, -110, 0, 26),
+	Text = "✨ 0 sprinkles",
+	TextColor3 = SPRINKLE_PINK,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+shopPurse.Parent = shop
+
+local closeButton = newButton({
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -14, 0, 14),
+	Size = UDim2.new(0, 40, 0, 40),
+	BackgroundColor3 = Color3.fromRGB(70, 66, 86),
+	Text = "✕",
+})
+closeButton.Parent = shop
+corner(closeButton, 12)
+
+local list = Instance.new("ScrollingFrame")
+list.Position = UDim2.new(0, 14, 0, 88)
+list.Size = UDim2.new(1, -28, 1, -180)
+list.BackgroundTransparency = 1
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 5
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.CanvasSize = UDim2.new()
+list.Parent = shop
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 8)
+listLayout.Parent = list
+
+-- One row per upgrade, built once and refreshed whenever state changes.
+local rows: { [string]: { buy: TextButton, name: TextLabel, effect: TextLabel } } = {}
+
+for index, upgrade in GameConfig.Upgrades do
+	local row = Instance.new("Frame")
+	row.Name = upgrade.Id
+	row.Size = UDim2.new(1, -6, 0, 82)
+	row.BackgroundColor3 = Color3.fromRGB(42, 40, 56)
+	row.BorderSizePixel = 0
+	row.LayoutOrder = index
+	row.Parent = list
+	corner(row, 12)
+
+	local nameLabel = newLabel({
+		Position = UDim2.new(0, 14, 0, 8),
+		Size = UDim2.new(1, -150, 0, 26),
+		Font = Enum.Font.FredokaOne,
+		Text = `{upgrade.Icon} {upgrade.Name}`,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	nameLabel.Parent = row
+
+	local blurb = newLabel({
+		Position = UDim2.new(0, 14, 0, 34),
+		Size = UDim2.new(1, -150, 0, 20),
+		Font = Enum.Font.Gotham,
+		Text = upgrade.Blurb,
+		TextColor3 = Color3.fromRGB(180, 176, 196),
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	blurb.Parent = row
+
+	local effect = newLabel({
+		Position = UDim2.new(0, 14, 0, 54),
+		Size = UDim2.new(1, -150, 0, 20),
+		Font = Enum.Font.GothamBold,
+		Text = "",
+		TextColor3 = COOKIE_YELLOW,
+		TextXAlignment = Enum.TextXAlignment.Left,
+	})
+	effect.Parent = row
+
+	local buy = newButton({
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.new(0, 120, 0, 58),
+		BackgroundColor3 = AFFORD_GREEN,
+		Text = "✨ 40",
+	})
+	buy.Parent = row
+	corner(buy, 10)
+
+	buy.Activated:Connect(function()
+		Remotes.BuyUpgrade:FireServer(upgrade.Id)
+	end)
+
+	rows[upgrade.Id] = { buy = buy, name = nameLabel, effect = effect }
+end
+
+local rebirthButton = newButton({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -16),
+	Size = UDim2.new(1, -32, 0, 66),
+	BackgroundColor3 = DENY_GREY,
+	Text = "⭐ REBIRTH",
+})
+rebirthButton.Parent = shop
+corner(rebirthButton, 14)
+
+rebirthButton.Activated:Connect(function()
+	Remotes.Rebirth:FireServer()
+end)
+
+local function setShopOpen(open: boolean)
+	shop.Visible = open
+end
+
+shopButton.Activated:Connect(function()
+	setShopOpen(not shop.Visible)
+end)
+closeButton.Activated:Connect(function()
+	setShopOpen(false)
+end)
+
+ProximityPromptService.PromptTriggered:Connect(function(prompt)
+	if CollectionService:HasTag(prompt, "ShopPrompt") then
+		setShopOpen(true)
+	end
+end)
+
+local function refreshShop()
+	shopPurse.Text = `✨ {GameConfig.abbreviate(state.sprinkles)} sprinkles`
+
+	for _, upgrade in GameConfig.Upgrades do
+		local row = rows[upgrade.Id]
+		local level = GameConfig.getUpgradeLevel(state, upgrade.Id)
+
+		row.name.Text = `{upgrade.Icon} {upgrade.Name}  ({level}/{upgrade.MaxLevel})`
+		row.effect.Text = GameConfig.describeUpgrade(state, upgrade)
+
+		if level >= upgrade.MaxLevel then
+			row.buy.Text = "MAX"
+			row.buy.BackgroundColor3 = DENY_GREY
+		else
+			local cost = GameConfig.getUpgradeCost(upgrade, level)
+			row.buy.Text = `✨ {GameConfig.abbreviate(cost)}`
+			row.buy.BackgroundColor3 = state.sprinkles >= cost and AFFORD_GREEN or DENY_GREY
+		end
+	end
+
+	if GameConfig.canRebirth(state) then
+		local nextMultiplier = 1 + GameConfig.RebirthMultiplierPerLevel * (state.rebirths + 1)
+		rebirthButton.Text = `⭐ REBIRTH → x{nextMultiplier} forever`
+		rebirthButton.BackgroundColor3 = Color3.fromRGB(226, 160, 60)
+	else
+		rebirthButton.Text = "⭐ Fill BIG BEBEH to rebirth"
+		rebirthButton.BackgroundColor3 = DENY_GREY
+	end
+end
+
 -- HUD updates --------------------------------------------------------------
 
 local function currentAreaIndex(): number
@@ -1423,6 +2163,11 @@ local function refreshPanel()
 	local here = currentAreaIndex()
 	areaTitle.Text = `{here}. {GameConfig.Areas[here].Name}`
 
+	sprinkleLabel.Text = `✨ {GameConfig.abbreviate(state.sprinkles)}`
+	rebirthBadge.Text = state.rebirths > 0
+			and `⭐ Rebirth {state.rebirths}  •  x{GameConfig.getRebirthMultiplier(state)}`
+		or ""
+
 	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
 	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
 	carryFill.Size = UDim2.fromScale(carryRatio, 1)
@@ -1436,9 +2181,10 @@ local function refreshPanel()
 
 	if carryRatio >= 1 then
 		hintLabel.Text = "Hands full — go feed Big Bebeh!"
+	elseif GameConfig.canRebirth(state) then
+		hintLabel.Text = "BIG BEBEH is full. Open the shop and rebirth!"
 	elseif fed >= cfg.HungerGoal then
-		hintLabel.Text = tracked < #GameConfig.Areas and "He's full! Head through the open gate →"
-			or "You fed BIG BEBEH everything. Legend."
+		hintLabel.Text = "He's full! Head through the open gate →"
 	else
 		hintLabel.Text = "Walk over cookies, then stand on the glowing pad to feed him."
 	end
@@ -1536,6 +2282,7 @@ end)
 Remotes.SyncState.OnClientEvent:Connect(function(newState)
 	state = newState
 	refreshPanel()
+	refreshShop()
 	refreshAllGates()
 	refreshAllBebehs()
 end)
@@ -1690,6 +2437,7 @@ end)
 
 -- Tell the server we are ready, so we get the first state even if we loaded late.
 Remotes.SyncState:FireServer()
+refreshShop()
 
 task.spawn(function()
 	while true do

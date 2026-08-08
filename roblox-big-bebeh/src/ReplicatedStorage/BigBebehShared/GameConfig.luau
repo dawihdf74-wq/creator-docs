@@ -8,8 +8,16 @@ local GameConfig = {}
 
 -- Saving -------------------------------------------------------------------
 GameConfig.SaveEnabled = true
-GameConfig.DataStoreName = "BigBebehCookies_v1"
+GameConfig.DataStoreName = "BigBebehCookies_v2"
 GameConfig.AutosaveInterval = 120
+
+-- Big Bebeh's look ---------------------------------------------------------
+-- Leave this empty to use the part-built Bebeh. To use your own artwork,
+-- upload the picture to Roblox (Create → Decals), then paste its id here as
+-- "rbxassetid://0000000000" and every Bebeh becomes a cutout of your image.
+-- A Model named "BigBebeh" in ServerStorage beats both of these.
+GameConfig.BebehImageId = ""
+GameConfig.BebehImageAspect = 1152 / 1320 -- width / height of the artwork
 
 -- Gameplay tuning ----------------------------------------------------------
 GameConfig.FeedRadius = 16 -- studs; walk this close to Big Bebeh to auto-feed
@@ -17,6 +25,7 @@ GameConfig.FeedInterval = 0.3 -- seconds between auto-feed checks
 GameConfig.CookieRespawnTime = 5 -- seconds before a picked-up cookie comes back
 GameConfig.CollectRange = 14 -- server-side sanity check on pickups
 GameConfig.VoidY = -60 -- fall below this and you get placed back on your area
+GameConfig.MagnetInterval = 0.15 -- seconds between magnet sweeps
 
 -- World layout -------------------------------------------------------------
 GameConfig.PlatformSize = Vector3.new(220, 6, 220)
@@ -25,7 +34,8 @@ GameConfig.BridgeWidth = 26
 
 -- Areas --------------------------------------------------------------------
 -- Feed the Bebeh in area N its HungerGoal to unlock area N + 1.
--- CarryCapacity is how many cookies you can hold once that area is unlocked.
+-- CarryCapacity is the base hand size once that area is unlocked; the
+-- Bigger Hands upgrade multiplies it.
 GameConfig.Areas = {
 	{
 		Name = "Cookie Nursery",
@@ -89,15 +99,132 @@ GameConfig.Areas = {
 	},
 }
 
+-- Upgrades -----------------------------------------------------------------
+-- Bought with Sprinkles, which you earn by feeding Big Bebeh.
+GameConfig.SprinklesPerCookieFed = 1
+
+GameConfig.BaseWalkSpeed = 16
+GameConfig.CapacityPerLevel = 0.2 -- +20% of the area's base capacity per level
+GameConfig.SpeedPerLevel = 2 -- +2 walk speed per level
+GameConfig.MagnetBaseRadius = 9 -- radius at level 1
+GameConfig.MagnetPerLevel = 2.5 -- extra radius for each level after the first
+GameConfig.LuckPerLevel = 0.05 -- +5% chance of a double-value cookie per level
+
+GameConfig.Upgrades = {
+	{
+		Id = "Capacity",
+		Name = "Bigger Hands",
+		Icon = "🧤",
+		Blurb = "Carry more cookies each trip",
+		MaxLevel = 20,
+		BaseCost = 40,
+		CostMultiplier = 1.42,
+	},
+	{
+		Id = "Speed",
+		Name = "Sugar Rush",
+		Icon = "👟",
+		Blurb = "Run faster between cookies",
+		MaxLevel = 15,
+		BaseCost = 60,
+		CostMultiplier = 1.5,
+	},
+	{
+		Id = "Magnet",
+		Name = "Cookie Magnet",
+		Icon = "🧲",
+		Blurb = "Suck up cookies without touching them",
+		MaxLevel = 12,
+		BaseCost = 120,
+		CostMultiplier = 1.55,
+	},
+	{
+		Id = "Luck",
+		Name = "Double Chip",
+		Icon = "🍀",
+		Blurb = "Chance for a cookie to count twice",
+		MaxLevel = 10,
+		BaseCost = 200,
+		CostMultiplier = 1.6,
+	},
+}
+
+-- Rebirth ------------------------------------------------------------------
+-- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
+-- upgrade and sprinkle, plus a permanent multiplier on everything you collect.
+GameConfig.RebirthMultiplierPerLevel = 0.5
+GameConfig.RebirthSprinkleBonus = 2500
+
 -- Helpers ------------------------------------------------------------------
 
 function GameConfig.getAreaCenter(areaIndex: number): Vector3
 	return Vector3.new((areaIndex - 1) * GameConfig.AreaSpacing, 0, 0)
 end
 
-function GameConfig.getCapacity(maxArea: number): number
-	local area = GameConfig.Areas[math.clamp(maxArea, 1, #GameConfig.Areas)]
-	return area.CarryCapacity
+function GameConfig.getUpgrade(id: string)
+	for _, upgrade in GameConfig.Upgrades do
+		if upgrade.Id == id then
+			return upgrade
+		end
+	end
+	return nil
+end
+
+function GameConfig.getUpgradeLevel(state: any, id: string): number
+	return (state.upgrades and state.upgrades[id]) or 0
+end
+
+-- Cost of the NEXT level, given how many you already own.
+function GameConfig.getUpgradeCost(upgrade: any, currentLevel: number): number
+	return math.floor(upgrade.BaseCost * upgrade.CostMultiplier ^ currentLevel)
+end
+
+function GameConfig.getCapacity(state: any): number
+	local area = GameConfig.Areas[math.clamp(state.maxArea or 1, 1, #GameConfig.Areas)]
+	local level = GameConfig.getUpgradeLevel(state, "Capacity")
+	return math.floor(area.CarryCapacity * (1 + GameConfig.CapacityPerLevel * level))
+end
+
+function GameConfig.getWalkSpeed(state: any): number
+	return GameConfig.BaseWalkSpeed + GameConfig.SpeedPerLevel * GameConfig.getUpgradeLevel(state, "Speed")
+end
+
+-- Level 0 means no magnet at all.
+function GameConfig.getMagnetRadius(state: any): number
+	local level = GameConfig.getUpgradeLevel(state, "Magnet")
+	if level <= 0 then
+		return 0
+	end
+	return GameConfig.MagnetBaseRadius + GameConfig.MagnetPerLevel * (level - 1)
+end
+
+function GameConfig.getLuckChance(state: any): number
+	return math.min(1, GameConfig.LuckPerLevel * GameConfig.getUpgradeLevel(state, "Luck"))
+end
+
+function GameConfig.getRebirthMultiplier(state: any): number
+	return 1 + GameConfig.RebirthMultiplierPerLevel * (state.rebirths or 0)
+end
+
+function GameConfig.canRebirth(state: any): boolean
+	local last = #GameConfig.Areas
+	return (state.fed and state.fed[last] or 0) >= GameConfig.Areas[last].HungerGoal
+end
+
+-- Short "what does this level do" text for the shop.
+function GameConfig.describeUpgrade(state: any, upgrade: any): string
+	local level = GameConfig.getUpgradeLevel(state, upgrade.Id)
+	if upgrade.Id == "Capacity" then
+		return `Hands: {GameConfig.abbreviate(GameConfig.getCapacity(state))}`
+	elseif upgrade.Id == "Speed" then
+		return `Speed: {GameConfig.getWalkSpeed(state)}`
+	elseif upgrade.Id == "Magnet" then
+		local radius = GameConfig.getMagnetRadius(state)
+		return radius > 0 and `Reach: {math.floor(radius)} studs` or "Not bought yet"
+	elseif upgrade.Id == "Luck" then
+		return `Double chance: {math.floor(GameConfig.getLuckChance(state) * 100)}%`
+	end
+	return `Level {level}`
 end
 
 -- Turns 45000 into "45K" so the HUD never overflows.
