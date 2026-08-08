@@ -1,0 +1,37 @@
+{
+  "name": "big-bebeh-cookie-collector",
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "BigBebehShared": {
+        "$path": "src/ReplicatedStorage/BigBebehShared"
+      }
+    },
+
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "BigBebehGame": {
+        "$path": "src/ServerScriptService/BigBebehGame"
+      }
+    },
+
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "BigBebehClient": {
+          "$path": "src/StarterPlayer/StarterPlayerScripts/BigBebehClient.client.luau"
+        }
+      }
+    },
+
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": {
+        "FilteringEnabled": true
+      }
+    }
+  }
+}
