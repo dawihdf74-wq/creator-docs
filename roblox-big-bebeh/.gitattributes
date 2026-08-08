@@ -1,0 +1,10 @@
+# Mesh, render and Blender assets are binary. Without this git applies line
+# ending conversion to them and the files arrive corrupt.
+*.fbx   binary
+*.glb   binary
+*.blend binary
+*.png   binary
+
+# Roblox place files are XML; keep them LF so they diff cleanly.
+*.rbxlx text eol=lf
+*.luau  text eol=lf

@@ -20,6 +20,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local Remotes = require(ReplicatedStorage.BigBebehShared.Remotes)
+local BebehBuilder = require(script.BebehBuilder)
 local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
 
@@ -56,7 +57,59 @@ local function randomCookiePosition(areaIndex: number): Vector3
 	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(20, halfZ))
 end
 
+-- Import models/BigBebehCookie.fbx and name it "CookieModel" in ServerStorage
+-- to swap the procedural cookie for the sculpted mesh.
+local COOKIE_TEMPLATE = ServerStorage:FindFirstChild("CookieModel")
+local COOKIE_TARGET_WIDTH = 3.2
+
+local function createMeshCookie(areaIndex: number): Model
+	local cfg = GameConfig.Areas[areaIndex]
+	local model = (COOKIE_TEMPLATE :: Model):Clone()
+	model.Name = "Cookie"
+
+	-- Match the procedural cookie's footprint whatever scale it imported at.
+	pcall(function()
+		model:ScaleTo(1)
+		local _, size = model:GetBoundingBox()
+		if size.X > 0.001 then
+			model:ScaleTo(COOKIE_TARGET_WIDTH / size.X)
+		end
+	end)
+
+	-- The biggest part becomes the touch target; the chips stay inert.
+	local biggest: BasePart? = nil
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Material = Enum.Material.Sand
+			local color = BebehBuilder.colorFor(part.Name)
+			part.Color = color or cfg.CookieColor
+			if not biggest or part.Size.Magnitude > biggest.Size.Magnitude then
+				biggest = part
+			end
+		end
+	end
+
+	if biggest then
+		biggest.Name = "Disc"
+		biggest.CanTouch = true
+		model.PrimaryPart = biggest
+	end
+
+	model:SetAttribute("AreaIndex", areaIndex)
+	model:SetAttribute("Value", cfg.CookieValue)
+	model:SetAttribute("IsMesh", true)
+	return model
+end
+
 local function createCookie(areaIndex: number): Model
+	if COOKIE_TEMPLATE and COOKIE_TEMPLATE:IsA("Model") then
+		return createMeshCookie(areaIndex)
+	end
+
 	local cfg = GameConfig.Areas[areaIndex]
 
 	local model = Instance.new("Model")
@@ -101,14 +154,22 @@ end
 local function placeCookie(model: Model)
 	local areaIndex = model:GetAttribute("AreaIndex") :: number
 	local pos = randomCookiePosition(areaIndex)
-	local disc = model.PrimaryPart :: Part
-	-- The cylinder's axis runs along its local X, so roll it 90° to lie flat.
-	disc.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
-	for _, chip in model:GetChildren() do
-		if chip:IsA("BasePart") and chip.Name == "Chip" then
-			chip.Position = pos + (chip:GetAttribute("Offset") :: Vector3)
+
+	if model:GetAttribute("IsMesh") then
+		-- The sculpted cookie is already flat, so move it whole and spin the
+		-- yaw for variety.
+		model:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.random() * math.pi * 2, 0))
+	else
+		local disc = model.PrimaryPart :: Part
+		-- The cylinder's axis runs along its local X, so roll it 90° to lie flat.
+		disc.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+		for _, chip in model:GetChildren() do
+			if chip:IsA("BasePart") and chip.Name == "Chip" then
+				chip.Position = pos + (chip:GetAttribute("Offset") :: Vector3)
+			end
 		end
 	end
+
 	model.Parent = world.cookiesFolder
 end
 

@@ -356,6 +356,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local Remotes = require(ReplicatedStorage.BigBebehShared.Remotes)
+local BebehBuilder = require(script.BebehBuilder)
 local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
 
@@ -392,7 +393,59 @@ local function randomCookiePosition(areaIndex: number): Vector3
 	return center + Vector3.new(math.random(-halfX, halfX), 2.4, math.random(20, halfZ))
 end
 
+-- Import models/BigBebehCookie.fbx and name it "CookieModel" in ServerStorage
+-- to swap the procedural cookie for the sculpted mesh.
+local COOKIE_TEMPLATE = ServerStorage:FindFirstChild("CookieModel")
+local COOKIE_TARGET_WIDTH = 3.2
+
+local function createMeshCookie(areaIndex: number): Model
+	local cfg = GameConfig.Areas[areaIndex]
+	local model = (COOKIE_TEMPLATE :: Model):Clone()
+	model.Name = "Cookie"
+
+	-- Match the procedural cookie's footprint whatever scale it imported at.
+	pcall(function()
+		model:ScaleTo(1)
+		local _, size = model:GetBoundingBox()
+		if size.X > 0.001 then
+			model:ScaleTo(COOKIE_TARGET_WIDTH / size.X)
+		end
+	end)
+
+	-- The biggest part becomes the touch target; the chips stay inert.
+	local biggest: BasePart? = nil
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Material = Enum.Material.Sand
+			local color = BebehBuilder.colorFor(part.Name)
+			part.Color = color or cfg.CookieColor
+			if not biggest or part.Size.Magnitude > biggest.Size.Magnitude then
+				biggest = part
+			end
+		end
+	end
+
+	if biggest then
+		biggest.Name = "Disc"
+		biggest.CanTouch = true
+		model.PrimaryPart = biggest
+	end
+
+	model:SetAttribute("AreaIndex", areaIndex)
+	model:SetAttribute("Value", cfg.CookieValue)
+	model:SetAttribute("IsMesh", true)
+	return model
+end
+
 local function createCookie(areaIndex: number): Model
+	if COOKIE_TEMPLATE and COOKIE_TEMPLATE:IsA("Model") then
+		return createMeshCookie(areaIndex)
+	end
+
 	local cfg = GameConfig.Areas[areaIndex]
 
 	local model = Instance.new("Model")
@@ -437,14 +490,22 @@ end
 local function placeCookie(model: Model)
 	local areaIndex = model:GetAttribute("AreaIndex") :: number
 	local pos = randomCookiePosition(areaIndex)
-	local disc = model.PrimaryPart :: Part
-	-- The cylinder's axis runs along its local X, so roll it 90° to lie flat.
-	disc.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
-	for _, chip in model:GetChildren() do
-		if chip:IsA("BasePart") and chip.Name == "Chip" then
-			chip.Position = pos + (chip:GetAttribute("Offset") :: Vector3)
+
+	if model:GetAttribute("IsMesh") then
+		-- The sculpted cookie is already flat, so move it whole and spin the
+		-- yaw for variety.
+		model:PivotTo(CFrame.new(pos) * CFrame.Angles(0, math.random() * math.pi * 2, 0))
+	else
+		local disc = model.PrimaryPart :: Part
+		-- The cylinder's axis runs along its local X, so roll it 90° to lie flat.
+		disc.CFrame = CFrame.new(pos) * CFrame.Angles(0, 0, math.rad(90))
+		for _, chip in model:GetChildren() do
+			if chip:IsA("BasePart") and chip.Name == "Chip" then
+				chip.Position = pos + (chip:GetAttribute("Offset") :: Vector3)
+			end
 		end
 	end
+
 	model.Parent = world.cookiesFolder
 end
 
@@ -1330,7 +1391,8 @@ return WorldBuilder
 	sleepy arced eyes, blushy cheeks, a blue bib and a big blue pacifier.
 
 	Three ways to get a Bebeh, in priority order:
-	  1. A Model named "BigBebeh" in ServerStorage — cloned and scaled.
+	  1. A Model named "BigBebeh" in ServerStorage — cloned and scaled. This is
+	     what you get after importing models/BigBebeh.fbx (see the README).
 	  2. GameConfig.BebehImageId — a flat cutout of your own artwork.
 	  3. Otherwise, the part-built one below.
 
@@ -1347,17 +1409,111 @@ local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 
 local BebehBuilder = {}
 
-local BROWN = Color3.fromRGB(156, 112, 76)
-local BROWN_DARK = Color3.fromRGB(120, 84, 56)
-local EAR_YELLOW = Color3.fromRGB(250, 226, 72)
-local EAR_YELLOW_DARK = Color3.fromRGB(222, 196, 48)
-local BIB_BLUE = Color3.fromRGB(152, 216, 240)
-local BIB_BLUE_LIGHT = Color3.fromRGB(196, 234, 250)
-local PACI_BLUE = Color3.fromRGB(88, 152, 242)
-local PACI_PURPLE = Color3.fromRGB(150, 120, 226)
-local BLUSH = Color3.fromRGB(238, 138, 138)
-local DIAPER = Color3.fromRGB(246, 244, 238)
-local INK = Color3.fromRGB(18, 16, 16)
+local BROWN = Color3.fromRGB(150, 104, 66)
+local BROWN_DARK = Color3.fromRGB(106, 68, 40)
+local EAR_YELLOW = Color3.fromRGB(247, 226, 30)
+local EAR_YELLOW_DARK = Color3.fromRGB(222, 188, 18)
+local BIB_BLUE = Color3.fromRGB(108, 204, 238)
+local BIB_BLUE_LIGHT = Color3.fromRGB(132, 215, 243)
+local PACI_BLUE = Color3.fromRGB(48, 128, 222)
+local PACI_KNOB = Color3.fromRGB(104, 186, 246)
+local PACI_PURPLE = Color3.fromRGB(134, 106, 205)
+local BLUSH = Color3.fromRGB(226, 118, 104)
+local DIAPER = Color3.fromRGB(248, 246, 240)
+local INK = Color3.fromRGB(20, 18, 18)
+
+-- How tall an imported Bebeh should stand at BebehScale = 1. The part-built one
+-- is about this height, so the feed radius and camera framing stay tuned.
+local IMPORT_TARGET_HEIGHT = 33
+
+--[[
+	Colours for an imported mesh, keyed by the object names the Blender script
+	uses. Roblox's 3D importer carries those names onto the MeshParts, so a
+	freshly imported model can be tinted without anyone editing it by hand.
+	Longest prefix wins, so "EarInner" beats "Ear" and "HeadSide" beats "Head".
+]]
+local MESH_COLORS: { [string]: Color3 } = {
+	Head = BROWN,
+	HeadSide = BROWN_DARK,
+	Stripe = EAR_YELLOW,
+	Ear = EAR_YELLOW,
+	EarInner = EAR_YELLOW_DARK,
+	Eye = INK,
+	Blush = BLUSH,
+	Bib = BIB_BLUE,
+	Bow = BIB_BLUE_LIGHT,
+	PaciShield = PACI_BLUE,
+	PaciDot = Color3.fromRGB(36, 104, 178),
+	PaciKnob = PACI_KNOB,
+	PaciRing = PACI_PURPLE,
+	Diaper = DIAPER,
+	Foot = BROWN,
+	Tail = EAR_YELLOW,
+	CookieBase = Color3.fromRGB(210, 154, 92),
+	CookieChip = Color3.fromRGB(72, 42, 26),
+}
+
+local MESH_COLOR_KEYS: { string } = {}
+for key in MESH_COLORS do
+	table.insert(MESH_COLOR_KEYS, key)
+end
+table.sort(MESH_COLOR_KEYS, function(a, b)
+	return #a > #b
+end)
+
+function BebehBuilder.colorFor(partName: string): Color3?
+	for _, key in MESH_COLOR_KEYS do
+		if string.sub(partName, 1, #key) == key then
+			return MESH_COLORS[key]
+		end
+	end
+	return nil
+end
+
+--[[
+	Tints every part of an imported model by name and makes it inert: nothing
+	collides or fires touch events, because the caller adds one clean collider.
+	Returns how many parts were recognised, so a mismatched model can be spotted.
+]]
+function BebehBuilder.styleImported(model: Model): number
+	local matched = 0
+	for _, part in model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanTouch = false
+			part.CanQuery = false
+			part.Material = Enum.Material.SmoothPlastic
+			local color = BebehBuilder.colorFor(part.Name)
+			if color then
+				part.Color = color
+				matched += 1
+			end
+		end
+	end
+	return matched
+end
+
+--[[
+	Rescales a model so it stands `targetHeight` studs tall, then applies the
+	area's own multiplier. Studio's 3D importer picks its own unit scale, so
+	without this an imported Bebeh could arrive any size at all.
+]]
+function BebehBuilder.normalizeHeight(model: Model, targetHeight: number, scale: number)
+	local ok = pcall(function()
+		model:ScaleTo(1)
+	end)
+	if not ok then
+		return
+	end
+	local _, size = model:GetBoundingBox()
+	if size.Y <= 0.001 then
+		return
+	end
+	pcall(function()
+		model:ScaleTo((targetHeight / size.Y) * scale)
+	end)
+end
 
 --[[
 	Collects parts as we go. Every piece is authored around the origin with the
@@ -1546,8 +1702,8 @@ local function buildBlockyBebeh(scale: number): Model
 	add("BowKnot", v(1.3, 1.3, 1.3), at(0, -5.8, faceZ - 0.85), BIB_BLUE_LIGHT, Enum.PartType.Ball)
 
 	-- Pacifier ---------------------------------------------------------------
-	add("PaciShield", v(6, 4, 1.8), at(0, -2.3, faceZ - 0.8), BIB_BLUE, Enum.PartType.Ball)
-	add("PaciKnob", v(3, 3, 2.6), at(0, -2.1, faceZ - 1.9), PACI_BLUE, Enum.PartType.Ball)
+	add("PaciShield", v(6, 4, 1.8), at(0, -2.3, faceZ - 0.8), PACI_BLUE, Enum.PartType.Ball)
+	add("PaciKnob", v(3, 3, 2.6), at(0, -2.1, faceZ - 1.9), PACI_KNOB, Enum.PartType.Ball)
 	-- The ring is a circle of beads, which reads as a torus from any angle.
 	for i = 0, 11 do
 		local angle = (i / 12) * math.pi * 2
@@ -1619,15 +1775,15 @@ function BebehBuilder.build(areaIndex: number, areaConfig: any, pivot: CFrame): 
 	local scale = areaConfig.BebehScale
 
 	local model: Model
+	local imported = false
 	local template = ServerStorage:FindFirstChild("BigBebeh")
 	if template and template:IsA("Model") then
 		model = template:Clone()
-		local ok, err = pcall(function()
-			model:ScaleTo(scale)
-		end)
-		if not ok then
-			warn(`[BigBebeh] Could not scale ServerStorage.BigBebeh: {err}`)
+		imported = true
+		if BebehBuilder.styleImported(model) == 0 then
+			warn("[BigBebeh] Imported model had no recognisable part names; leaving its colours alone.")
 		end
+		BebehBuilder.normalizeHeight(model, IMPORT_TARGET_HEIGHT, scale)
 	elseif GameConfig.BebehImageId ~= "" then
 		model = buildImageBebeh(scale, GameConfig.BebehImageId)
 	else
@@ -1643,6 +1799,23 @@ function BebehBuilder.build(areaIndex: number, areaConfig: any, pivot: CFrame): 
 	local bottom = boxCFrame.Position.Y - size.Y / 2
 	model:PivotTo(model:GetPivot() + Vector3.new(0, pivot.Position.Y - bottom, 0))
 	model:SetAttribute("AreaIndex", areaIndex)
+
+	-- An imported mesh has no collider of its own, and letting every ear and
+	-- pacifier bead collide would snag players. One clean box around the body
+	-- does the job, and doubles as a stable PrimaryPart for the animation.
+	if imported then
+		local box, bodySize = model:GetBoundingBox()
+		local collider = Instance.new("Part")
+		collider.Name = "Collider"
+		collider.Size = Vector3.new(bodySize.X * 0.5, bodySize.Y * 0.66, bodySize.Z * 0.6)
+		collider.CFrame = CFrame.new(box.Position - Vector3.new(0, bodySize.Y * 0.15, 0))
+		collider.Anchored = true
+		collider.Transparency = 1
+		collider.CanCollide = true
+		collider.CanTouch = false
+		collider.Parent = model
+		model.PrimaryPart = collider
+	end
 
 	-- Floating nameplate. The numbers are per-player, so the client fills them in.
 	local billboard = Instance.new("BillboardGui")
