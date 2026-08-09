@@ -14,6 +14,7 @@
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -222,6 +223,7 @@ local function sync(player: Player)
 		rebirths = state.rebirths,
 		runes = state.runes,
 		runesOpened = state.runesOpened,
+		passes = state.passes,
 	})
 end
 
@@ -272,6 +274,7 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 	local value = (model:GetAttribute("Value") :: number)
 		* GameConfig.getRebirthMultiplier(state)
 		* GameConfig.getCookieMultiplier(state)
+		* GameConfig.getPassMultiplier(state)
 	local lucky = math.random() < GameConfig.getLuckChance(state)
 	if lucky then
 		value *= 2
@@ -562,6 +565,49 @@ Remotes.Rebirth.OnServerEvent:Connect(function(player)
 	sync(player)
 end)
 
+-- Game passes --------------------------------------------------------------
+
+--[[
+	Ownership is answered by Roblox, on the server, once per session. It is never
+	read from the save and never taken from the client, so neither an edited save
+	nor a spoofed remote can hand somebody a paid perk.
+]]
+local function refreshPasses(player: Player, state: any)
+	for _, pass in GameConfig.GamePasses do
+		if pass.AssetId <= 0 then
+			continue -- not configured yet; the button explains this to the player
+		end
+		local ok, owns = pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(player.UserId, pass.AssetId)
+		end)
+		if ok then
+			state.passes[pass.Id] = owns
+		else
+			-- A failed check must not silently grant the perk.
+			state.passes[pass.Id] = false
+			warn(`[BigBebeh] Could not check {pass.Name} for {player.Name}: {owns}`)
+		end
+	end
+end
+
+-- Grant immediately on purchase, so nobody has to rejoin to see it work.
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, assetId, purchased)
+	if not purchased then
+		return
+	end
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+	for _, pass in GameConfig.GamePasses do
+		if pass.AssetId > 0 and pass.AssetId == assetId then
+			state.passes[pass.Id] = true
+			toast(player, `{pass.Icon} {pass.Name} active!`, UNLOCK_COLOR)
+			sync(player)
+		end
+	end
+end)
+
 -- Players ------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
@@ -585,6 +631,15 @@ local function onPlayerAdded(player: Player)
 	applyWalkSpeed(player, state)
 	sync(player)
 	toast(player, `Welcome! Collect cookies and feed {GameConfig.Areas[state.maxArea].BebehName}.`, COOKIE_COLOR)
+
+	-- Asking Roblox who owns what is a web call. Run it after the first sync so a
+	-- slow answer delays the pass button lighting up, not the entire HUD.
+	task.spawn(function()
+		refreshPasses(player, state)
+		if PlayerState.get(player) == state then
+			sync(player)
+		end
+	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)

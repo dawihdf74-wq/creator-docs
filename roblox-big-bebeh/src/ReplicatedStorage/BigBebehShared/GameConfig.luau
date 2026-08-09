@@ -321,6 +321,55 @@ function GameConfig.rollRune(luck: number)
 	return GameConfig.Runes[1]
 end
 
+-- Game passes --------------------------------------------------------------
+--[[
+	Paid perks. To make one live:
+
+	  1. Create the pass on Roblox: Creations -> your experience -> Passes.
+	  2. Open it and copy the number out of its URL.
+	  3. Paste it into `AssetId` below.
+
+	Until an AssetId is set the button still shows, but says it is not
+	configured rather than prompting a purchase that would fail.
+
+	Ownership is checked on the SERVER against Roblox and is never read from a
+	save file, so a tampered save cannot grant a pass.
+]]
+GameConfig.GamePasses = {
+	{
+		Id = "DoubleCookies",
+		Name = "x2 Cookies",
+		Blurb = "Every cookie is worth double, forever",
+		Icon = "🍪",
+		AssetId = 0, -- <- paste your pass id here
+		Multiplier = 2,
+	},
+}
+
+function GameConfig.getGamePass(id: string)
+	for _, pass in GameConfig.GamePasses do
+		if pass.Id == id then
+			return pass
+		end
+	end
+	return nil
+end
+
+function GameConfig.ownsPass(state: any, id: string): boolean
+	return (state.passes and state.passes[id]) == true
+end
+
+-- Cookie multiplier from every pass the player owns. Passes stack.
+function GameConfig.getPassMultiplier(state: any): number
+	local multiplier = 1
+	for _, pass in GameConfig.GamePasses do
+		if GameConfig.ownsPass(state, pass.Id) then
+			multiplier *= pass.Multiplier
+		end
+	end
+	return multiplier
+end
+
 -- Rebirth ------------------------------------------------------------------
 -- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
 -- upgrade and sprinkle, plus a permanent multiplier on everything you collect.

@@ -11,6 +11,7 @@
 
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -43,6 +44,7 @@ local state = {
 	rebirths = 0,
 	runes = {},
 	runesOpened = 0,
+	passes = {},
 }
 
 local gui = Instance.new("ScreenGui")
@@ -233,6 +235,66 @@ local _, setFeed = UI.bar(hud, {
 	height = 14,
 	props = { Name = "FeedBar", Position = UDim2.new(0, 0, 0, Theme.space(31)) },
 })
+
+-- Game passes --------------------------------------------------------------
+
+--[[
+	One button per paid perk, above the menu buttons. It shows what the perk does
+	when you do not own it and confirms it is active when you do, so the same
+	control answers both "what is this" and "is it working".
+
+	The button only prompts; whether you own it is decided by the server.
+]]
+local passButtons: { [string]: TextButton } = {}
+
+local passRail = Instance.new("Frame")
+passRail.Name = "PassRail"
+passRail.AnchorPoint = Vector2.new(1, 1)
+passRail.Position = UDim2.new(1, -Theme.space(4), 1, -Theme.space(21))
+passRail.Size = UDim2.new(0, 296, 0, 60)
+passRail.BackgroundTransparency = 1
+passRail.Parent = gui
+UI.list(passRail, 2)
+
+for index, pass in GameConfig.GamePasses do
+	passButtons[pass.Id] = UI.button(passRail, {
+		text = `{pass.Icon} {string.upper(pass.Name)}`,
+		color = Theme.color.warn,
+		props = {
+			Name = pass.Id,
+			Size = UDim2.new(1, 0, 0, 56),
+			LayoutOrder = index,
+			TextSize = Theme.textSize.lg,
+		},
+		onClick = function()
+			if GameConfig.ownsPass(state, pass.Id) then
+				return -- already active; nothing to buy
+			end
+			if pass.AssetId <= 0 then
+				warn(`[BigBebeh] {pass.Name} has no AssetId set in GameConfig.GamePasses.`)
+				warn("[BigBebeh] Create the pass on Roblox, then paste its id there.")
+				return
+			end
+			MarketplaceService:PromptGamePassPurchase(player, pass.AssetId)
+		end,
+	})
+end
+
+local function refreshPasses()
+	for _, pass in GameConfig.GamePasses do
+		local button = passButtons[pass.Id]
+		if not button then
+			continue
+		end
+		if GameConfig.ownsPass(state, pass.Id) then
+			button.Text = `{pass.Icon} {string.upper(pass.Name)}  ✓`
+			button.BackgroundColor3 = Theme.color.good
+		else
+			button.Text = `{pass.Icon} {string.upper(pass.Name)}`
+			button.BackgroundColor3 = Theme.color.warn
+		end
+	end
+end
 
 -- Shop ---------------------------------------------------------------------
 
@@ -957,6 +1019,7 @@ Remotes.SyncState.OnClientEvent:Connect(function(newState)
 	refreshShop()
 	refreshRunes()
 	refreshBoard()
+	refreshPasses()
 	refreshAllGates()
 	refreshAllBebehs()
 end)

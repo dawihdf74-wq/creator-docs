@@ -90,6 +90,50 @@ sprinkle**, hands you a 2,500-sprinkle bonus, and permanently multiplies
 everything you collect by `1 + 0.5 × rebirths`. Your second run is half again as
 fast, your third is twice as fast, and so on.
 
+## Game passes — x2 Cookies
+
+There is one pass wired up: **x2 Cookies**, which doubles every cookie you pick
+up, forever. Its button sits above SHOP and RUNES in the corner of the screen —
+amber while you do not own it, green with a ✓ once you do.
+
+The code is finished, but the pass itself has to exist on **your** Roblox
+account before anyone can buy it. Nobody else can create it for you, because it
+sells under your name and pays out to you.
+
+1. Go to [create.roblox.com](https://create.roblox.com) → your experience →
+   **Associated Items** → **Passes** → **Create a Pass**.
+2. Name it `x2 Cookies`, give it an icon, and set the price you want.
+3. Open the finished pass. Its id is the number in the address bar:
+   `.../game-pass/`**`123456789`**`/x2-Cookies`.
+4. Paste that number into `GameConfig.GamePasses`:
+
+```lua
+GameConfig.GamePasses = {
+	{
+		Id = "DoubleCookies",
+		Name = "x2 Cookies",
+		...
+		AssetId = 123456789, -- <- paste your pass id here
+		Multiplier = 2,
+	},
+}
+```
+
+Until you do, the button is deliberately inert: clicking it writes a reminder to
+the Output window instead of opening a purchase dialog that could only fail.
+
+To add a second pass, add another entry to that table. The button, the ownership
+check and the multiplier all follow from it — the only thing a new pass needs
+beyond the table entry is a `Multiplier` that means something for your game.
+
+**A note on how ownership is decided.** The server asks Roblox
+(`MarketplaceService:UserOwnsGamePassAsync`) once when you join, and listens for
+`PromptGamePassPurchaseFinished` so a purchase applies immediately without
+rejoining. Ownership is *never* read back from the save file — `sanitize` drops
+a `passes` field on purpose — so editing a save cannot hand anyone a pass they
+did not pay for. If the ownership check fails (a Roblox outage, say), it fails
+closed to "not owned" rather than granting the perk.
+
 ## Installing
 
 ### Option A — open the place file (easiest)
@@ -291,6 +335,9 @@ Everything is in `src/ReplicatedStorage/BigBebehShared/GameConfig.luau`:
   `MaxLevel` caps it. Add an entry and a new shop row appears by itself, though a
   brand-new upgrade id also needs its effect wiring up in the helpers below the
   table.
+- `GamePasses` — paid perks. `AssetId` is the id Roblox gives your pass; leave it
+  at `0` and the button stays inert instead of prompting a purchase that cannot
+  complete. See [Game passes](#game-passes--x2-cookies) above.
 - `SprinklesPerCookieFed` / `RebirthMultiplierPerLevel` — the economy dials.
 - `FeedRadius` — how close you must stand to feed him.
 - `CookieRespawnTime` — how quickly a collected cookie comes back.

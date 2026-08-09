@@ -12,6 +12,7 @@
 		rebirths  = 0,
 		runes     = { BasicCookie = 412, RareCookie = 8 },
 		runesOpened = 420,
+		passes    = { DoubleCookies = true }, -- runtime only, never saved
 	}
 ]]
 
@@ -55,6 +56,8 @@ local function defaultState()
 		rebirths = 0,
 		runes = runes,
 		runesOpened = 0,
+		-- Game pass ownership is filled in from Roblox after the state loads.
+		passes = {},
 	}
 end
 
@@ -98,6 +101,9 @@ local function sanitize(raw: any)
 	if type(raw.runesOpened) == "number" and raw.runesOpened >= 0 then
 		state.runesOpened = math.floor(raw.runesOpened)
 	end
+
+	-- `passes` is deliberately NOT read from the save. Ownership is answered by
+	-- Roblox on the server every session, so an edited save cannot grant one.
 
 	if type(raw.carried) == "number" and raw.carried >= 0 then
 		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state))

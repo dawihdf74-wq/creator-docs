@@ -345,6 +345,55 @@ function GameConfig.rollRune(luck: number)
 	return GameConfig.Runes[1]
 end
 
+-- Game passes --------------------------------------------------------------
+--[[
+	Paid perks. To make one live:
+
+	  1. Create the pass on Roblox: Creations -> your experience -> Passes.
+	  2. Open it and copy the number out of its URL.
+	  3. Paste it into `AssetId` below.
+
+	Until an AssetId is set the button still shows, but says it is not
+	configured rather than prompting a purchase that would fail.
+
+	Ownership is checked on the SERVER against Roblox and is never read from a
+	save file, so a tampered save cannot grant a pass.
+]]
+GameConfig.GamePasses = {
+	{
+		Id = "DoubleCookies",
+		Name = "x2 Cookies",
+		Blurb = "Every cookie is worth double, forever",
+		Icon = "🍪",
+		AssetId = 0, -- <- paste your pass id here
+		Multiplier = 2,
+	},
+}
+
+function GameConfig.getGamePass(id: string)
+	for _, pass in GameConfig.GamePasses do
+		if pass.Id == id then
+			return pass
+		end
+	end
+	return nil
+end
+
+function GameConfig.ownsPass(state: any, id: string): boolean
+	return (state.passes and state.passes[id]) == true
+end
+
+-- Cookie multiplier from every pass the player owns. Passes stack.
+function GameConfig.getPassMultiplier(state: any): number
+	local multiplier = 1
+	for _, pass in GameConfig.GamePasses do
+		if GameConfig.ownsPass(state, pass.Id) then
+			multiplier *= pass.Multiplier
+		end
+	end
+	return multiplier
+end
+
 -- Rebirth ------------------------------------------------------------------
 -- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
 -- upgrade and sprinkle, plus a permanent multiplier on everything you collect.
@@ -1068,6 +1117,7 @@ return Components
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
@@ -1276,6 +1326,7 @@ local function sync(player: Player)
 		rebirths = state.rebirths,
 		runes = state.runes,
 		runesOpened = state.runesOpened,
+		passes = state.passes,
 	})
 end
 
@@ -1326,6 +1377,7 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 	local value = (model:GetAttribute("Value") :: number)
 		* GameConfig.getRebirthMultiplier(state)
 		* GameConfig.getCookieMultiplier(state)
+		* GameConfig.getPassMultiplier(state)
 	local lucky = math.random() < GameConfig.getLuckChance(state)
 	if lucky then
 		value *= 2
@@ -1616,6 +1668,49 @@ Remotes.Rebirth.OnServerEvent:Connect(function(player)
 	sync(player)
 end)
 
+-- Game passes --------------------------------------------------------------
+
+--[[
+	Ownership is answered by Roblox, on the server, once per session. It is never
+	read from the save and never taken from the client, so neither an edited save
+	nor a spoofed remote can hand somebody a paid perk.
+]]
+local function refreshPasses(player: Player, state: any)
+	for _, pass in GameConfig.GamePasses do
+		if pass.AssetId <= 0 then
+			continue -- not configured yet; the button explains this to the player
+		end
+		local ok, owns = pcall(function()
+			return MarketplaceService:UserOwnsGamePassAsync(player.UserId, pass.AssetId)
+		end)
+		if ok then
+			state.passes[pass.Id] = owns
+		else
+			-- A failed check must not silently grant the perk.
+			state.passes[pass.Id] = false
+			warn(`[BigBebeh] Could not check {pass.Name} for {player.Name}: {owns}`)
+		end
+	end
+end
+
+-- Grant immediately on purchase, so nobody has to rejoin to see it work.
+MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, assetId, purchased)
+	if not purchased then
+		return
+	end
+	local state = PlayerState.get(player)
+	if not state then
+		return
+	end
+	for _, pass in GameConfig.GamePasses do
+		if pass.AssetId > 0 and pass.AssetId == assetId then
+			state.passes[pass.Id] = true
+			toast(player, `{pass.Icon} {pass.Name} active!`, UNLOCK_COLOR)
+			sync(player)
+		end
+	end
+end)
+
 -- Players ------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
@@ -1639,6 +1734,15 @@ local function onPlayerAdded(player: Player)
 	applyWalkSpeed(player, state)
 	sync(player)
 	toast(player, `Welcome! Collect cookies and feed {GameConfig.Areas[state.maxArea].BebehName}.`, COOKIE_COLOR)
+
+	-- Asking Roblox who owns what is a web call. Run it after the first sync so a
+	-- slow answer delays the pass button lighting up, not the entire HUD.
+	task.spawn(function()
+		refreshPasses(player, state)
+		if PlayerState.get(player) == state then
+			sync(player)
+		end
+	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
@@ -1690,6 +1794,7 @@ end)
 		rebirths  = 0,
 		runes     = { BasicCookie = 412, RareCookie = 8 },
 		runesOpened = 420,
+		passes    = { DoubleCookies = true }, -- runtime only, never saved
 	}
 ]]
 
@@ -1733,6 +1838,8 @@ local function defaultState()
 		rebirths = 0,
 		runes = runes,
 		runesOpened = 0,
+		-- Game pass ownership is filled in from Roblox after the state loads.
+		passes = {},
 	}
 end
 
@@ -1776,6 +1883,9 @@ local function sanitize(raw: any)
 	if type(raw.runesOpened) == "number" and raw.runesOpened >= 0 then
 		state.runesOpened = math.floor(raw.runesOpened)
 	end
+
+	-- `passes` is deliberately NOT read from the save. Ownership is answered by
+	-- Roblox on the server every session, so an edited save cannot grant one.
 
 	if type(raw.carried) == "number" and raw.carried >= 0 then
 		state.carried = math.min(math.floor(raw.carried), GameConfig.getCapacity(state))
@@ -2941,6 +3051,7 @@ return BebehBuilder
 
 local CollectionService = game:GetService("CollectionService")
 local GuiService = game:GetService("GuiService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -2973,6 +3084,7 @@ local state = {
 	rebirths = 0,
 	runes = {},
 	runesOpened = 0,
+	passes = {},
 }
 
 local gui = Instance.new("ScreenGui")
@@ -3163,6 +3275,66 @@ local _, setFeed = UI.bar(hud, {
 	height = 14,
 	props = { Name = "FeedBar", Position = UDim2.new(0, 0, 0, Theme.space(31)) },
 })
+
+-- Game passes --------------------------------------------------------------
+
+--[[
+	One button per paid perk, above the menu buttons. It shows what the perk does
+	when you do not own it and confirms it is active when you do, so the same
+	control answers both "what is this" and "is it working".
+
+	The button only prompts; whether you own it is decided by the server.
+]]
+local passButtons: { [string]: TextButton } = {}
+
+local passRail = Instance.new("Frame")
+passRail.Name = "PassRail"
+passRail.AnchorPoint = Vector2.new(1, 1)
+passRail.Position = UDim2.new(1, -Theme.space(4), 1, -Theme.space(21))
+passRail.Size = UDim2.new(0, 296, 0, 60)
+passRail.BackgroundTransparency = 1
+passRail.Parent = gui
+UI.list(passRail, 2)
+
+for index, pass in GameConfig.GamePasses do
+	passButtons[pass.Id] = UI.button(passRail, {
+		text = `{pass.Icon} {string.upper(pass.Name)}`,
+		color = Theme.color.warn,
+		props = {
+			Name = pass.Id,
+			Size = UDim2.new(1, 0, 0, 56),
+			LayoutOrder = index,
+			TextSize = Theme.textSize.lg,
+		},
+		onClick = function()
+			if GameConfig.ownsPass(state, pass.Id) then
+				return -- already active; nothing to buy
+			end
+			if pass.AssetId <= 0 then
+				warn(`[BigBebeh] {pass.Name} has no AssetId set in GameConfig.GamePasses.`)
+				warn("[BigBebeh] Create the pass on Roblox, then paste its id there.")
+				return
+			end
+			MarketplaceService:PromptGamePassPurchase(player, pass.AssetId)
+		end,
+	})
+end
+
+local function refreshPasses()
+	for _, pass in GameConfig.GamePasses do
+		local button = passButtons[pass.Id]
+		if not button then
+			continue
+		end
+		if GameConfig.ownsPass(state, pass.Id) then
+			button.Text = `{pass.Icon} {string.upper(pass.Name)}  ✓`
+			button.BackgroundColor3 = Theme.color.good
+		else
+			button.Text = `{pass.Icon} {string.upper(pass.Name)}`
+			button.BackgroundColor3 = Theme.color.warn
+		end
+	end
+end
 
 -- Shop ---------------------------------------------------------------------
 
@@ -3887,6 +4059,7 @@ Remotes.SyncState.OnClientEvent:Connect(function(newState)
 	refreshShop()
 	refreshRunes()
 	refreshBoard()
+	refreshPasses()
 	refreshAllGates()
 	refreshAllBebehs()
 end)
