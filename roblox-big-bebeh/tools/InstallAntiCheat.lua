@@ -22,7 +22,7 @@ end
 local game_folder = ServerScriptService:FindFirstChild("BigBebehGame")
 if not game_folder then
 	warn("[Install] Could not find ServerScriptService.BigBebehGame — nothing was changed.")
-	return { "FAILED  ServerScriptService.BigBebehGame not found — nothing was changed." }
+	return "FAILED  ServerScriptService.BigBebehGame not found — nothing was changed."
 end
 
 local SOURCES = {}
@@ -804,7 +804,9 @@ print("  " .. summary)
 print("=== end ===")
 
 -- Returned as well as printed: a bridge plugin shows the return value in its own
--- report box, and print() only reaches the Output window. Returning it means the
--- result is copyable from wherever the script was run.
+-- report box, and print() only reaches the Output window.
+--
+-- One STRING, not a table. The bridge stringifies whatever it gets, so a table
+-- comes back as "table: 0x...". A joined string survives that intact.
 table.insert(report, summary)
-return report
+return table.concat(report, "\n")
