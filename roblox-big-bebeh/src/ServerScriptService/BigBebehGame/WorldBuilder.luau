@@ -573,8 +573,73 @@ local function buildBridge(areaIndex: number, parent: Instance)
 	return folder
 end
 
+--[[
+	Takes over a map that is already in the place instead of generating one.
+
+	Nothing here inspects the map's shape, because nothing needs to: the server
+	finds Bebehs, gates, feed pads, altars and boards through CollectionService
+	tags, and tags are saved with the place. So a hand-edited map works as long as
+	the tags are still on the right parts -- move things, restyle them, add your
+	own scenery, and it all keeps working.
+
+	The one thing that must exist is somewhere to put cookies.
+]]
+local function adopt(existing: Instance)
+	local cookiesFolder = existing:FindFirstChild("Cookies")
+	if not cookiesFolder then
+		cookiesFolder = Instance.new("Folder")
+		cookiesFolder.Name = "Cookies"
+		cookiesFolder.Parent = existing
+	end
+
+	-- Cookies are spawned fresh each run, so any left over from the edit session
+	-- would otherwise pile up.
+	cookiesFolder:ClearAllChildren()
+
+	local areas = {}
+	for _, model in CollectionService:GetTagged("BigBebeh") do
+		local index = model:GetAttribute("AreaIndex") :: number?
+		if index then
+			areas[index] = { folder = model.Parent, bebeh = model, center = GameConfig.getAreaCenter(index) }
+		end
+	end
+
+	local missing = {}
+	for i = 1, #GameConfig.Areas do
+		if not areas[i] then
+			table.insert(missing, i)
+		end
+	end
+	if #missing > 0 then
+		warn(
+			`[BigBebeh] Using the saved map, but no tagged Bebeh for area(s) {table.concat(missing, ", ")}. `
+				.. "Those areas cannot be fed. Re-tag the model with BigBebeh and set its AreaIndex attribute, "
+				.. `or clear the {WORLD_NAME} HandEdited attribute to regenerate.`
+		)
+	end
+
+	print(`[BigBebeh] Using the hand-edited map in {WORLD_NAME}. Delete it, or clear its HandEdited attribute, to go back to generating.`)
+
+	return {
+		world = existing,
+		areas = areas,
+		cookiesFolder = cookiesFolder,
+	}
+end
+
 function WorldBuilder.build()
 	local existing = workspace:FindFirstChild(WORLD_NAME)
+
+	--[[
+		A map marked HandEdited is yours: it is left exactly as saved. Without this
+		the builder wipes and regenerates on every server start, which is why
+		editing the map in Studio appeared to do nothing -- the edits were real,
+		they were just deleted a moment later.
+	]]
+	if existing and existing:GetAttribute("HandEdited") then
+		return adopt(existing)
+	end
+
 	if existing then
 		existing:Destroy()
 	end

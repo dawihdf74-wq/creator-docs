@@ -175,6 +175,42 @@ To wipe a board and start it again, bump `GameConfig.LeaderboardVersion`. The ol
 ordered store is abandoned rather than migrated, which is the cheap and honest
 way to reset a leaderboard.
 
+## Editing the map by hand
+
+By default `WorldBuilder` wipes `Workspace.BigBebehWorld` and regenerates it on
+every server start. That is what makes the map build itself from config — and it
+is also why editing the map in Studio appears to do nothing. The edits are real;
+they are deleted a moment later.
+
+To take ownership of the map, run **`tools/4_EditableMap.lua`** once in Studio
+(edit mode, not while playing), then **save the place**. It builds the map if it
+is not already there and sets a `HandEdited` attribute on the folder. From then
+on the server adopts what is in the place instead of generating.
+
+After that, edit freely: move things, restyle them, delete the scenery, build
+whole new zones.
+
+**What has to stay.** The server finds things by CollectionService tag, never by
+name or position, so anything keeps working as long as the tag is on the part
+you want to play that role:
+
+| Tag | What it is | Attributes it needs |
+|---|---|---|
+| `BigBebeh` | the model you feed | `AreaIndex` |
+| `FeedPad` | the pad you stand on | — |
+| `AreaGate` | the gate into an area | `AreaIndex` |
+| `RuneCrystal` | the rune altar crystal | — |
+| `UpgradeBoard` | the face the upgrade GUI draws on | — |
+| `Leaderboard` | a leaderboard face | `BoardId` |
+| `ShopPrompt` | the shop's ProximityPrompt | — |
+
+Cookies are still spawned by the server at runtime into the `Cookies` folder,
+inside each area's pit as set by `GameConfig`. Any cookies left lying in the
+folder from an edit session are cleared on start, so they do not pile up.
+
+To go back to a generated map, clear the `HandEdited` attribute (or delete the
+folder) and press Play.
+
 ## Anti-cheat
 
 Two modules under `ServerScriptService/BigBebehGame`:
