@@ -72,13 +72,23 @@ local function stroke(inst: Instance, thickness: number, color: Color3?, transpa
 	return s
 end
 
--- Vertical sheen. Subtle, but it is most of the difference between a flat
--- rectangle and something that looks lit.
+--[[
+	Vertical sheen. UIGradient multiplies the fill, so 1 leaves a colour alone
+	and anything lower darkens it -- the top stays put and the bottom falls away.
+
+	ColorSequence rejects channel values outside 0-1 outright, and an attempt to
+	brighten with 1.12 threw here and killed the rest of the HUD. Clamping keeps
+	a stray value from taking the whole script down again.
+]]
 local function gradient(inst: Instance, top: number, bottom: number, rotation: number?)
+	local function grey(v: number): Color3
+		local c = math.clamp(v, 0, 1)
+		return Color3.new(c, c, c)
+	end
 	local g = Instance.new("UIGradient")
 	g.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.new(top, top, top)),
-		ColorSequenceKeypoint.new(1, Color3.new(bottom, bottom, bottom)),
+		ColorSequenceKeypoint.new(0, grey(top)),
+		ColorSequenceKeypoint.new(1, grey(bottom)),
 	})
 	g.Rotation = rotation or 90
 	g.Parent = inst
@@ -98,7 +108,7 @@ local function newPanel(parent: Instance, props: { [string]: any }): Frame
 	frame.Parent = parent
 	corner(frame, 14)
 	stroke(frame, 3)
-	gradient(frame, 1.12, 0.86)
+	gradient(frame, 1, 0.82)
 	return frame
 end
 
@@ -117,7 +127,7 @@ local function newBigButton(parent: Instance, props: { [string]: any }): TextBut
 	button.Parent = parent
 	corner(button, 11)
 	stroke(button, 3)
-	gradient(button, 1.18, 0.82)
+	gradient(button, 1, 0.76)
 
 	local label = Instance.new("UITextSizeConstraint")
 	label.MaxTextSize = 26
@@ -281,7 +291,7 @@ carryFill.BackgroundColor3 = COOKIE_YELLOW
 carryFill.BorderSizePixel = 0
 carryFill.Parent = carryBack
 corner(carryFill, 5)
-gradient(carryFill, 1.25, 0.85)
+gradient(carryFill, 1, 0.78)
 
 local hungerLabel = newLabel({
 	Name = "Hunger",
@@ -309,7 +319,7 @@ hungerFill.BackgroundColor3 = Color3.fromRGB(255, 150, 190)
 hungerFill.BorderSizePixel = 0
 hungerFill.Parent = hungerBack
 corner(hungerFill, 7)
-gradient(hungerFill, 1.25, 0.85)
+gradient(hungerFill, 1, 0.78)
 
 local hintLabel = newLabel({
 	Name = "Hint",
@@ -395,7 +405,7 @@ for index, upgrade in GameConfig.Upgrades do
 	row.Parent = list
 	corner(row, 12)
 	stroke(row, 2)
-	gradient(row, 1.1, 0.92)
+	gradient(row, 1, 0.88)
 
 	local nameLabel = newLabel({
 		Position = UDim2.new(0, 14, 0, 8),
@@ -929,7 +939,7 @@ local function buildBoard(face: BasePart)
 	bg.BackgroundColor3 = PANEL_BG
 	bg.BorderSizePixel = 0
 	bg.Parent = surface
-	gradient(bg, 1.1, 0.86)
+	gradient(bg, 1, 0.84)
 
 	local title = newLabel({
 		Position = UDim2.new(0, 20, 0, 10),
@@ -962,7 +972,7 @@ local function buildBoard(face: BasePart)
 		card.Parent = grid
 		corner(card, 14)
 		stroke(card, 3)
-		gradient(card, 1.12, 0.9)
+		gradient(card, 1, 0.86)
 
 		local icon = newLabel({
 			Position = UDim2.new(0, 8, 0, 8),
