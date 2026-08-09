@@ -117,6 +117,9 @@ Create these and paste in the matching file's contents:
 | `ReplicatedStorage` | Folder | `BigBebehShared` | — |
 | `ReplicatedStorage/BigBebehShared` | ModuleScript | `GameConfig` | `src/ReplicatedStorage/BigBebehShared/GameConfig.luau` |
 | `ReplicatedStorage/BigBebehShared` | ModuleScript | `Remotes` | `src/ReplicatedStorage/BigBebehShared/Remotes.luau` |
+| `ReplicatedStorage/BigBebehShared` | Folder | `UI` | — |
+| `ReplicatedStorage/BigBebehShared/UI` | ModuleScript | `Theme` | `src/ReplicatedStorage/BigBebehShared/UI/Theme.luau` |
+| `ReplicatedStorage/BigBebehShared/UI` | ModuleScript | `Components` | `src/ReplicatedStorage/BigBebehShared/UI/Components.luau` |
 | `ServerScriptService` | **Script** | `BigBebehGame` | `src/ServerScriptService/BigBebehGame/init.server.luau` |
 | `ServerScriptService/BigBebehGame` | ModuleScript | `PlayerState` | `src/ServerScriptService/BigBebehGame/PlayerState.luau` |
 | `ServerScriptService/BigBebehGame` | ModuleScript | `WorldBuilder` | `src/ServerScriptService/BigBebehGame/WorldBuilder.luau` |
@@ -128,6 +131,34 @@ Script as children — that is what `require(script.PlayerState)` refers to.
 
 Then hit Play. The world (platforms, bridges, gates, Bebehs, cookies) is
 generated on server start, so you do not need to build anything yourself.
+
+## The UI design system
+
+`ReplicatedStorage/BigBebehShared/UI` holds the interface foundation, and every
+screen is being moved onto it one at a time.
+
+**`Theme`** is the token file. No screen hard-codes a colour, a text size or a
+gap — they all come from here, so the game restyles from one place. It encodes
+three things worth keeping: one dark ground with a few saturated accents that
+each own a concept (cookie / sprinkle / rune / good / bad), a six-step type
+scale so hierarchy reads instantly, and a 4px spacing grid — `Theme.space(3)` is
+12px. That grid is most of why a layout looks deliberate rather than nudged
+into place.
+
+**`Components`** is the widget library: `panel`, `pill`, `bar`, `button`,
+`label`, plus `list` and `padding` helpers. One definition per widget, so a
+panel looks the same everywhere instead of thirty hand-set Frames drifting
+apart. Each constructor takes `(parent, props)`, applies props last so callers
+can override anything, and parents the instance itself so it cannot be
+forgotten.
+
+`bar` returns a setter rather than the fill frame, so callers pass a 0-1 ratio
+and cannot forget to clamp. `button` captures its rest size once for the press
+animation — reading `Size` at click time would measure a half-finished tween and
+the button would shrink a little with every press.
+
+Migrated so far: the currency rail. The rest of the HUD still uses the older
+inline helpers and is being converted screen by screen.
 
 ## Seeing the map in Studio
 

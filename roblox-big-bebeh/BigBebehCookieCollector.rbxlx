@@ -1,24 +1,24 @@
 <roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
 <Meta name="ExplicitAutoJoints">true</Meta>
-<Item class="Workspace" referent="RBX9">
+<Item class="Workspace" referent="RBX12">
 <Properties>
 <string name="Name">Workspace</string>
 </Properties>
 </Item>
-<Item class="Lighting" referent="RBX10">
+<Item class="Lighting" referent="RBX13">
 <Properties>
 <string name="Name">Lighting</string>
 </Properties>
 </Item>
-<Item class="ReplicatedStorage" referent="RBX11">
+<Item class="ReplicatedStorage" referent="RBX14">
 <Properties>
 <string name="Name">ReplicatedStorage</string>
 </Properties>
-<Item class="Folder" referent="RBX3">
+<Item class="Folder" referent="RBX6">
 <Properties>
 <string name="Name">BigBebehShared</string>
 </Properties>
-<Item class="ModuleScript" referent="RBX1">
+<Item class="ModuleScript" referent="RBX4">
 <Properties>
 <string name="Name">GameConfig</string>
 <ProtectedString name="Source"><![CDATA[
@@ -497,7 +497,7 @@ return GameConfig
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX2">
+<Item class="ModuleScript" referent="RBX5">
 <Properties>
 <string name="Name">Remotes</string>
 <ProtectedString name="Source"><![CDATA[
@@ -550,13 +550,380 @@ return Remotes
 ]]></ProtectedString>
 </Properties>
 </Item>
+<Item class="Folder" referent="RBX3">
+<Properties>
+<string name="Name">UI</string>
+</Properties>
+<Item class="ModuleScript" referent="RBX1">
+<Properties>
+<string name="Name">Theme</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	Theme — the design tokens every piece of UI reads from.
+
+	Nothing in the interface should hard-code a colour, a font size or a gap.
+	They come from here, so the whole game restyles from one file and spacing
+	stays consistent instead of drifting a few pixels per screen.
+
+	Three rules this encodes:
+
+	  * One dark ground, a handful of saturated accents. Accents mean something
+	    (cookie / sprinkle / rune / good / bad); they are not decoration.
+	  * A type scale, not arbitrary sizes. Six steps, each clearly different
+	    from its neighbour, so hierarchy reads at a glance.
+	  * A 4px spacing grid. Every gap and inset is a multiple of it, which is
+	    most of why a layout looks deliberate rather than nudged into place.
+]]
+
+local Theme = {}
+
+-- Palette ------------------------------------------------------------------
+Theme.color = {
+	-- Surfaces, darkest to lightest.
+	bg = Color3.fromRGB(14, 13, 21),
+	surface = Color3.fromRGB(26, 24, 38),
+	surfaceAlt = Color3.fromRGB(38, 35, 54),
+	surfaceHi = Color3.fromRGB(52, 48, 72),
+	line = Color3.fromRGB(9, 8, 15),
+
+	-- Text ramp.
+	text = Color3.fromRGB(245, 243, 252),
+	textDim = Color3.fromRGB(152, 147, 174),
+	textFaint = Color3.fromRGB(104, 100, 124),
+
+	-- Accents. Each one owns a concept.
+	cookie = Color3.fromRGB(255, 199, 74),
+	sprinkle = Color3.fromRGB(255, 122, 205),
+	rune = Color3.fromRGB(167, 122, 255),
+	hunger = Color3.fromRGB(255, 138, 180),
+
+	-- States.
+	good = Color3.fromRGB(64, 200, 112),
+	warn = Color3.fromRGB(255, 168, 64),
+	bad = Color3.fromRGB(226, 74, 92),
+	muted = Color3.fromRGB(62, 58, 80),
+}
+
+-- Type ---------------------------------------------------------------------
+Theme.font = {
+	display = Enum.Font.FredokaOne, -- headings, numbers, buttons
+	bold = Enum.Font.GothamBold, -- labels that need weight
+	body = Enum.Font.GothamMedium, -- descriptions
+}
+
+Theme.textSize = {
+	xs = 12,
+	sm = 14,
+	md = 17,
+	lg = 22,
+	xl = 28,
+	xxl = 36,
+}
+
+-- Spacing: a 4px grid. `Theme.space(3)` is 12px.
+function Theme.space(steps: number): number
+	return steps * 4
+end
+
+Theme.radius = {
+	sm = 8,
+	md = 12,
+	lg = 16,
+}
+
+Theme.stroke = {
+	thin = 2,
+	thick = 3,
+}
+
+-- Motion. Shared curves keep every transition feeling like one product.
+Theme.motion = {
+	fast = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	normal = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+	-- Slight overshoot, for things that should feel springy (pickups, unlocks).
+	pop = TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+}
+
+--[[
+	How far a surface is lit from the top. UIGradient multiplies the fill, so 1
+	leaves a colour untouched and lower values darken. Brightening past 1 is not
+	possible -- ColorSequence rejects it -- so the top sits at 1 and the bottom
+	carries the shading.
+]]
+Theme.sheen = {
+	panel = 0.82,
+	button = 0.76,
+	row = 0.9,
+}
+
+return Theme
+]]></ProtectedString>
+</Properties>
+</Item>
+<Item class="ModuleScript" referent="RBX2">
+<Properties>
+<string name="Name">Components</string>
+<ProtectedString name="Source"><![CDATA[
+--[[
+	Components — the primitives every screen is built from.
+
+	One definition per widget. A panel looks the same everywhere because there
+	is exactly one function that makes panels, not thirty hand-set Frames that
+	drifted apart.
+
+	Every constructor takes (parent, props) and returns the instance. Props are
+	applied last so a caller can override anything, and parenting happens inside
+	so it can never be forgotten.
+]]
+
+local TweenService = game:GetService("TweenService")
+
+local Theme = require(script.Parent.Theme)
+
+local Components = {}
+
+-- Internals ----------------------------------------------------------------
+
+local function apply(instance: Instance, props: { [string]: any }?)
+	if not props then
+		return instance
+	end
+	for key, value in props do
+		(instance :: any)[key] = value
+	end
+	return instance
+end
+
+local function round(instance: Instance, radius: number)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius)
+	c.Parent = instance
+	return c
+end
+
+local function outline(instance: Instance, thickness: number, color: Color3?)
+	local s = Instance.new("UIStroke")
+	s.Thickness = thickness
+	s.Color = color or Theme.color.line
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = instance
+	return s
+end
+
+--[[
+	Top-down sheen. Values are clamped because ColorSequence rejects anything
+	outside 0-1 and one out-of-range value takes down the whole script.
+]]
+local function sheen(instance: Instance, bottom: number)
+	local function grey(v: number)
+		local c = math.clamp(v, 0, 1)
+		return Color3.new(c, c, c)
+	end
+	local g = Instance.new("UIGradient")
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, grey(1)),
+		ColorSequenceKeypoint.new(1, grey(bottom)),
+	})
+	g.Rotation = 90
+	g.Parent = instance
+	return g
+end
+
+Components.round = round
+Components.outline = outline
+Components.sheen = sheen
+
+-- Layout helpers -----------------------------------------------------------
+
+function Components.padding(parent: Instance, steps: number)
+	local pad = Instance.new("UIPadding")
+	local amount = UDim.new(0, Theme.space(steps))
+	pad.PaddingTop = amount
+	pad.PaddingBottom = amount
+	pad.PaddingLeft = amount
+	pad.PaddingRight = amount
+	pad.Parent = parent
+	return pad
+end
+
+function Components.list(parent: Instance, gapSteps: number, horizontal: boolean?)
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, Theme.space(gapSteps))
+	layout.FillDirection = horizontal and Enum.FillDirection.Horizontal or Enum.FillDirection.Vertical
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = parent
+	return layout
+end
+
+-- Widgets ------------------------------------------------------------------
+
+function Components.label(parent: Instance, props: { [string]: any }?): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Theme.font.bold
+	label.TextColor3 = Theme.color.text
+	label.TextSize = Theme.textSize.md
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.RichText = true
+	apply(label, props)
+	label.Parent = parent
+	return label
+end
+
+function Components.panel(parent: Instance, props: { [string]: any }?): Frame
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = Theme.color.surface
+	frame.BorderSizePixel = 0
+	apply(frame, props)
+	frame.Parent = parent
+	round(frame, Theme.radius.lg)
+	outline(frame, Theme.stroke.thick)
+	sheen(frame, Theme.sheen.panel)
+	return frame
+end
+
+-- A compact stat readout: coloured icon, then a value. Used for currencies.
+function Components.pill(parent: Instance, config: {
+	icon: string,
+	color: Color3,
+	text: string?,
+	props: { [string]: any }?,
+}): (Frame, TextLabel)
+	local frame = Instance.new("Frame")
+	frame.BackgroundColor3 = Theme.color.surface
+	frame.BorderSizePixel = 0
+	frame.Size = UDim2.new(0, 196, 0, 44)
+	apply(frame, config.props)
+	frame.Parent = parent
+	round(frame, Theme.radius.md)
+	outline(frame, Theme.stroke.thick)
+	sheen(frame, Theme.sheen.panel)
+
+	-- A colour chip carries the identity, so the value can stay plain white and
+	-- readable rather than tinted to the point of poor contrast.
+	local chip = Instance.new("Frame")
+	chip.Size = UDim2.new(0, 30, 0, 30)
+	chip.Position = UDim2.new(0, Theme.space(2), 0.5, -15)
+	chip.BackgroundColor3 = config.color
+	chip.BorderSizePixel = 0
+	chip.Parent = frame
+	round(chip, Theme.radius.sm)
+	sheen(chip, 0.8)
+
+	Components.label(chip, {
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.font.display,
+		Text = config.icon,
+		TextSize = Theme.textSize.md,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+
+	local value = Components.label(frame, {
+		Name = "Value",
+		Position = UDim2.new(0, Theme.space(11), 0, 0),
+		Size = UDim2.new(1, -Theme.space(13), 1, 0),
+		Font = Theme.font.display,
+		Text = config.text or "0",
+		TextSize = Theme.textSize.lg,
+		TextStrokeTransparency = 0.4,
+	})
+
+	return frame, value
+end
+
+--[[
+	A progress bar. Returns a setter rather than the fill frame, so callers deal
+	in a 0-1 ratio and cannot forget to clamp it.
+]]
+function Components.bar(parent: Instance, config: {
+	color: Color3,
+	height: number?,
+	props: { [string]: any }?,
+}): (Frame, (number, Color3?) -> ())
+	local track = Instance.new("Frame")
+	track.BackgroundColor3 = Theme.color.bg
+	track.BorderSizePixel = 0
+	track.Size = UDim2.new(1, 0, 0, config.height or 12)
+	apply(track, config.props)
+	track.Parent = parent
+	round(track, Theme.radius.sm)
+	outline(track, Theme.stroke.thin, Theme.color.surfaceHi)
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = config.color
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	round(fill, Theme.radius.sm)
+	sheen(fill, 0.78)
+
+	local function set(ratio: number, color: Color3?)
+		local clamped = math.clamp(ratio, 0, 1)
+		TweenService:Create(fill, Theme.motion.normal, { Size = UDim2.fromScale(clamped, 1) }):Play()
+		if color then
+			fill.BackgroundColor3 = color
+		end
+	end
+
+	return track, set
+end
+
+function Components.button(parent: Instance, config: {
+	text: string,
+	color: Color3?,
+	props: { [string]: any }?,
+	onClick: (() -> ())?,
+}): TextButton
+	local button = Instance.new("TextButton")
+	button.BackgroundColor3 = config.color or Theme.color.good
+	button.BorderSizePixel = 0
+	button.AutoButtonColor = true
+	button.Font = Theme.font.display
+	button.TextColor3 = Theme.color.text
+	button.TextSize = Theme.textSize.lg
+	button.Text = config.text
+	button.Size = UDim2.new(0, 140, 0, 48)
+	apply(button, config.props)
+	button.Parent = parent
+	round(button, Theme.radius.md)
+	outline(button, Theme.stroke.thick)
+	sheen(button, Theme.sheen.button)
+
+	--[[
+		A press should feel like a press. The rest size is captured once: reading
+		button.Size at click time would measure a half-finished tween and the
+		button would creep smaller with every press.
+	]]
+	local restSize = button.Size
+	local pressedSize = restSize - UDim2.fromOffset(0, 3)
+	button.MouseButton1Down:Connect(function()
+		TweenService:Create(button, Theme.motion.fast, { Size = pressedSize }):Play()
+	end)
+	local function release()
+		TweenService:Create(button, Theme.motion.fast, { Size = restSize }):Play()
+	end
+	button.MouseButton1Up:Connect(release)
+	button.MouseLeave:Connect(release)
+
+	if config.onClick then
+		button.Activated:Connect(config.onClick)
+	end
+	return button
+end
+
+return Components
+]]></ProtectedString>
+</Properties>
 </Item>
 </Item>
-<Item class="ServerScriptService" referent="RBX12">
+</Item>
+</Item>
+<Item class="ServerScriptService" referent="RBX15">
 <Properties>
 <string name="Name">ServerScriptService</string>
 </Properties>
-<Item class="Script" referent="RBX7">
+<Item class="Script" referent="RBX10">
 <Properties>
 <string name="Name">BigBebehGame</string>
 <ProtectedString name="Source"><![CDATA[
@@ -1180,7 +1547,7 @@ game:BindToClose(function()
 end)
 ]]></ProtectedString>
 </Properties>
-<Item class="ModuleScript" referent="RBX4">
+<Item class="ModuleScript" referent="RBX7">
 <Properties>
 <string name="Name">PlayerState</string>
 <ProtectedString name="Source"><![CDATA[
@@ -1355,7 +1722,7 @@ return PlayerState
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX5">
+<Item class="ModuleScript" referent="RBX8">
 <Properties>
 <string name="Name">WorldBuilder</string>
 <ProtectedString name="Source"><![CDATA[
@@ -1920,7 +2287,7 @@ return WorldBuilder
 ]]></ProtectedString>
 </Properties>
 </Item>
-<Item class="ModuleScript" referent="RBX6">
+<Item class="ModuleScript" referent="RBX9">
 <Properties>
 <string name="Name">BebehBuilder</string>
 <ProtectedString name="Source"><![CDATA[
@@ -2419,20 +2786,20 @@ return BebehBuilder
 </Item>
 </Item>
 </Item>
-<Item class="ServerStorage" referent="RBX13">
+<Item class="ServerStorage" referent="RBX16">
 <Properties>
 <string name="Name">ServerStorage</string>
 </Properties>
 </Item>
-<Item class="StarterPlayer" referent="RBX15">
+<Item class="StarterPlayer" referent="RBX18">
 <Properties>
 <string name="Name">StarterPlayer</string>
 </Properties>
-<Item class="StarterPlayerScripts" referent="RBX14">
+<Item class="StarterPlayerScripts" referent="RBX17">
 <Properties>
 <string name="Name">StarterPlayerScripts</string>
 </Properties>
-<Item class="LocalScript" referent="RBX8">
+<Item class="LocalScript" referent="RBX11">
 <Properties>
 <string name="Name">BigBebehClient</string>
 <ProtectedString name="Source"><![CDATA[
@@ -2459,6 +2826,12 @@ local TweenService = game:GetService("TweenService")
 local sharedFolder = ReplicatedStorage:WaitForChild("BigBebehShared")
 local GameConfig = require(sharedFolder:WaitForChild("GameConfig"))
 local Remotes = require(sharedFolder:WaitForChild("Remotes"))
+
+-- Design system. Screens are being migrated onto this one at a time; anything
+-- still using the old local helpers below has not been converted yet.
+local uiFolder = sharedFolder:WaitForChild("UI")
+local Theme = require(uiFolder:WaitForChild("Theme"))
+local UI = require(uiFolder:WaitForChild("Components"))
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -2634,36 +3007,31 @@ end
 
 -- HUD ----------------------------------------------------------------------
 
--- Sprinkle purse, top left.
-local purse = newPanel(gui, {
-	Name = "Purse",
-	Position = UDim2.new(0, 14, 0, topSafeY(4)),
-	Size = UDim2.new(0, 204, 0, 46),
+--[[
+	Currency rail, top left. A vertical stack rather than scattered labels, so
+	adding a currency later means appending one pill and nothing has to move.
+]]
+local rail = Instance.new("Frame")
+rail.Name = "CurrencyRail"
+rail.Position = UDim2.new(0, Theme.space(4), 0, topSafeY(4))
+rail.Size = UDim2.new(0, 200, 0, 120)
+rail.BackgroundTransparency = 1
+rail.Parent = gui
+UI.list(rail, 2)
+
+local _, sprinkleLabel = UI.pill(rail, {
+	icon = "✦",
+	color = Theme.color.sprinkle,
+	text = "0",
+	props = { Name = "Sprinkles", LayoutOrder = 1 },
 })
 
-local sprinkleLabel = newLabel({
-	Name = "Sprinkles",
-	Position = UDim2.new(0, 12, 0, 6),
-	Size = UDim2.new(1, -24, 1, -12),
-	Font = Enum.Font.FredokaOne,
-	Text = "✨ 0",
-	TextColor3 = SPRINKLE_PINK,
-	TextStrokeTransparency = 0.35,
-	TextXAlignment = Enum.TextXAlignment.Left,
+local rebirthPill, rebirthLabel = UI.pill(rail, {
+	icon = "★",
+	color = Theme.color.cookie,
+	text = "x1",
+	props = { Name = "Rebirth", LayoutOrder = 2, Visible = false },
 })
-sprinkleLabel.Parent = purse
-
-local rebirthBadge = newLabel({
-	Name = "RebirthBadge",
-	Position = UDim2.new(0, 14, 0, topSafeY(52)),
-	Size = UDim2.new(0, 190, 0, 26),
-	Font = Enum.Font.GothamBold,
-	Text = "",
-	TextColor3 = Color3.fromRGB(255, 226, 130),
-	TextStrokeTransparency = 0.4,
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-rebirthBadge.Parent = gui
 
 -- Toast stack, just under the title.
 local toastHolder = Instance.new("Frame")
@@ -3322,10 +3690,10 @@ local function refreshPanel()
 	local here = currentAreaIndex()
 	areaLabel.Text = `{here}. {GameConfig.Areas[here].Name}`
 
-	sprinkleLabel.Text = `✨ {GameConfig.abbreviate(state.sprinkles)}`
-	rebirthBadge.Text = state.rebirths > 0
-			and `⭐ Rebirth {state.rebirths}  •  x{GameConfig.getRebirthMultiplier(state)}`
-		or ""
+	sprinkleLabel.Text = GameConfig.abbreviate(state.sprinkles)
+	-- The rebirth pill only earns its space once you have actually rebirthed.
+	rebirthPill.Visible = state.rebirths > 0
+	rebirthLabel.Text = `x{GameConfig.getRebirthMultiplier(state)}`
 
 	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
 	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
@@ -3829,12 +4197,12 @@ hudReady = true
 </Item>
 </Item>
 </Item>
-<Item class="Players" referent="RBX16">
+<Item class="Players" referent="RBX19">
 <Properties>
 <string name="Name">Players</string>
 </Properties>
 </Item>
-<Item class="SoundService" referent="RBX17">
+<Item class="SoundService" referent="RBX20">
 <Properties>
 <string name="Name">SoundService</string>
 </Properties>

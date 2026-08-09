@@ -22,6 +22,12 @@ local sharedFolder = ReplicatedStorage:WaitForChild("BigBebehShared")
 local GameConfig = require(sharedFolder:WaitForChild("GameConfig"))
 local Remotes = require(sharedFolder:WaitForChild("Remotes"))
 
+-- Design system. Screens are being migrated onto this one at a time; anything
+-- still using the old local helpers below has not been converted yet.
+local uiFolder = sharedFolder:WaitForChild("UI")
+local Theme = require(uiFolder:WaitForChild("Theme"))
+local UI = require(uiFolder:WaitForChild("Components"))
+
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
@@ -196,36 +202,31 @@ end
 
 -- HUD ----------------------------------------------------------------------
 
--- Sprinkle purse, top left.
-local purse = newPanel(gui, {
-	Name = "Purse",
-	Position = UDim2.new(0, 14, 0, topSafeY(4)),
-	Size = UDim2.new(0, 204, 0, 46),
+--[[
+	Currency rail, top left. A vertical stack rather than scattered labels, so
+	adding a currency later means appending one pill and nothing has to move.
+]]
+local rail = Instance.new("Frame")
+rail.Name = "CurrencyRail"
+rail.Position = UDim2.new(0, Theme.space(4), 0, topSafeY(4))
+rail.Size = UDim2.new(0, 200, 0, 120)
+rail.BackgroundTransparency = 1
+rail.Parent = gui
+UI.list(rail, 2)
+
+local _, sprinkleLabel = UI.pill(rail, {
+	icon = "✦",
+	color = Theme.color.sprinkle,
+	text = "0",
+	props = { Name = "Sprinkles", LayoutOrder = 1 },
 })
 
-local sprinkleLabel = newLabel({
-	Name = "Sprinkles",
-	Position = UDim2.new(0, 12, 0, 6),
-	Size = UDim2.new(1, -24, 1, -12),
-	Font = Enum.Font.FredokaOne,
-	Text = "✨ 0",
-	TextColor3 = SPRINKLE_PINK,
-	TextStrokeTransparency = 0.35,
-	TextXAlignment = Enum.TextXAlignment.Left,
+local rebirthPill, rebirthLabel = UI.pill(rail, {
+	icon = "★",
+	color = Theme.color.cookie,
+	text = "x1",
+	props = { Name = "Rebirth", LayoutOrder = 2, Visible = false },
 })
-sprinkleLabel.Parent = purse
-
-local rebirthBadge = newLabel({
-	Name = "RebirthBadge",
-	Position = UDim2.new(0, 14, 0, topSafeY(52)),
-	Size = UDim2.new(0, 190, 0, 26),
-	Font = Enum.Font.GothamBold,
-	Text = "",
-	TextColor3 = Color3.fromRGB(255, 226, 130),
-	TextStrokeTransparency = 0.4,
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-rebirthBadge.Parent = gui
 
 -- Toast stack, just under the title.
 local toastHolder = Instance.new("Frame")
@@ -884,10 +885,10 @@ local function refreshPanel()
 	local here = currentAreaIndex()
 	areaLabel.Text = `{here}. {GameConfig.Areas[here].Name}`
 
-	sprinkleLabel.Text = `✨ {GameConfig.abbreviate(state.sprinkles)}`
-	rebirthBadge.Text = state.rebirths > 0
-			and `⭐ Rebirth {state.rebirths}  •  x{GameConfig.getRebirthMultiplier(state)}`
-		or ""
+	sprinkleLabel.Text = GameConfig.abbreviate(state.sprinkles)
+	-- The rebirth pill only earns its space once you have actually rebirthed.
+	rebirthPill.Visible = state.rebirths > 0
+	rebirthLabel.Text = `x{GameConfig.getRebirthMultiplier(state)}`
 
 	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
 	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
