@@ -175,6 +175,16 @@ straight off disk, so this takes about a minute:
 Press Play. Every Bebeh in the game becomes the sculpted mesh, and every cookie
 becomes the sculpted cookie. Nothing else needs changing.
 
+**A raw import looks huge and grey — that is expected.** Roblox's importer picks
+its own unit scale, and FBX material colours are not carried across, so the
+MeshParts arrive plain. The game fixes both when it clones him at runtime, so he
+is correct the moment you press Play.
+
+If you would rather see him fixed straight away in the editor, paste
+`tools/SetupBebehImport.lua` into the Command Bar. It tints every part, rescales
+him to the height the game uses, and files him into ServerStorage under the right
+name — the same work the game does, just done now so you can look at him.
+
 Two things happen automatically so the import "just works":
 
 - **Colours.** The importer keeps the Blender object names (`Head`, `EarInnerL`,
