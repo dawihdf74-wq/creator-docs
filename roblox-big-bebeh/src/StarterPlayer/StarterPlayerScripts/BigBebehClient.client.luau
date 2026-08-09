@@ -243,95 +243,104 @@ toastLayout.SortOrder = Enum.SortOrder.LayoutOrder
 toastLayout.Padding = UDim.new(0, 6)
 toastLayout.Parent = toastHolder
 
--- Bottom panel: what you are carrying, and how hungry the Bebeh still is.
-local panel = newPanel(gui, {
-	Name = "Panel",
+--[[
+	Bottom HUD. Two readouts that matter while you play: how full your hands are,
+	and how full the Bebeh is. The zone name sits above them as quiet context.
+
+	Everything is on the 4px grid and every colour comes from the theme, so this
+	panel reads as part of the same product as the currency rail.
+]]
+local hud = UI.panel(gui, {
+	Name = "Hud",
 	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -18),
-	Size = UDim2.new(0, 452, 0, 138),
+	Position = UDim2.new(0.5, 0, 1, -Theme.space(5)),
+	Size = UDim2.new(0, 468, 0, 166),
+})
+UI.padding(hud, 4)
+
+-- Header: zone name and number, both quiet. This is context, not the subject.
+local zoneName = UI.label(hud, {
+	Name = "ZoneName",
+	Size = UDim2.new(1, -80, 0, 18),
+	Font = Theme.font.bold,
+	Text = "COOKIE NURSERY",
+	TextColor3 = Theme.color.textFaint,
+	TextSize = Theme.textSize.xs,
 })
 
-local areaLabel = newLabel({
-	Name = "AreaName",
-	Position = UDim2.new(0, 16, 0, -26),
-	Size = UDim2.new(1, -32, 0, 24),
-	Font = Enum.Font.FredokaOne,
-	Text = GameConfig.Areas[1].Name,
-	TextColor3 = Color3.fromRGB(236, 232, 250),
-	TextStrokeTransparency = 0.25,
-	TextXAlignment = Enum.TextXAlignment.Left,
+local zoneNumber = UI.label(hud, {
+	Name = "ZoneNumber",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, 0),
+	Size = UDim2.new(0, 76, 0, 18),
+	Font = Theme.font.bold,
+	Text = "ZONE 1",
+	TextColor3 = Theme.color.textFaint,
+	TextSize = Theme.textSize.xs,
+	TextXAlignment = Enum.TextXAlignment.Right,
 })
-areaLabel.Parent = panel
 
-local carryLabel = newLabel({
-	Name = "Carry",
-	Position = UDim2.new(0, 16, 0, 8),
-	Size = UDim2.new(1, -32, 0, 34),
-	Font = Enum.Font.FredokaOne,
-	Text = "🍪 0 / 30",
-	TextColor3 = COOKIE_YELLOW,
-	TextStrokeTransparency = 0.35,
-	TextXAlignment = Enum.TextXAlignment.Left,
+-- Carry: the headline number, so it gets the icon chip and the largest type.
+local carryChip = Instance.new("Frame")
+carryChip.Name = "CarryChip"
+carryChip.Position = UDim2.new(0, 0, 0, Theme.space(6))
+carryChip.Size = UDim2.fromOffset(38, 38)
+carryChip.BackgroundColor3 = Theme.color.cookie
+carryChip.BorderSizePixel = 0
+carryChip.Parent = hud
+UI.round(carryChip, Theme.radius.sm)
+UI.sheen(carryChip, 0.8)
+UI.label(carryChip, {
+	Size = UDim2.fromScale(1, 1),
+	Font = Theme.font.display,
+	Text = "🍪",
+	TextSize = Theme.textSize.lg,
+	TextXAlignment = Enum.TextXAlignment.Center,
 })
-carryLabel.Parent = panel
 
-local carryBack = Instance.new("Frame")
-carryBack.Name = "CarryBar"
-carryBack.Position = UDim2.new(0, 16, 0, 44)
-carryBack.Size = UDim2.new(1, -32, 0, 10)
-carryBack.BackgroundColor3 = Color3.fromRGB(12, 11, 18)
-carryBack.BorderSizePixel = 0
-carryBack.Parent = panel
-stroke(carryBack, 2, Color3.fromRGB(52, 48, 70))
-corner(carryBack, 5)
-
-local carryFill = Instance.new("Frame")
-carryFill.Name = "Fill"
-carryFill.Size = UDim2.fromScale(0, 1)
-carryFill.BackgroundColor3 = COOKIE_YELLOW
-carryFill.BorderSizePixel = 0
-carryFill.Parent = carryBack
-corner(carryFill, 5)
-gradient(carryFill, 1, 0.78)
-
-local hungerLabel = newLabel({
-	Name = "Hunger",
-	Position = UDim2.new(0, 16, 0, 62),
-	Size = UDim2.new(1, -32, 0, 28),
-	Text = "Baby Bebeh  0 / 60",
-	TextXAlignment = Enum.TextXAlignment.Left,
+local carryValue = UI.label(hud, {
+	Name = "CarryValue",
+	Position = UDim2.new(0, Theme.space(12), 0, Theme.space(6)),
+	Size = UDim2.new(1, -Theme.space(12), 0, 38),
+	Font = Theme.font.display,
+	Text = "0",
+	TextSize = Theme.textSize.xl,
+	TextStrokeTransparency = 0.5,
 })
-hungerLabel.Parent = panel
 
-local hungerBack = Instance.new("Frame")
-hungerBack.Name = "HungerBar"
-hungerBack.Position = UDim2.new(0, 16, 0, 92)
-hungerBack.Size = UDim2.new(1, -32, 0, 14)
-hungerBack.BackgroundColor3 = Color3.fromRGB(12, 11, 18)
-hungerBack.BorderSizePixel = 0
-hungerBack.Parent = panel
-stroke(hungerBack, 2, Color3.fromRGB(52, 48, 70))
-corner(hungerBack, 7)
-
-local hungerFill = Instance.new("Frame")
-hungerFill.Name = "Fill"
-hungerFill.Size = UDim2.fromScale(0, 1)
-hungerFill.BackgroundColor3 = Color3.fromRGB(255, 150, 190)
-hungerFill.BorderSizePixel = 0
-hungerFill.Parent = hungerBack
-corner(hungerFill, 7)
-gradient(hungerFill, 1, 0.78)
-
-local hintLabel = newLabel({
-	Name = "Hint",
-	Position = UDim2.new(0, 16, 0, 108),
-	Size = UDim2.new(1, -32, 0, 20),
-	Font = Enum.Font.Gotham,
-	Text = "Walk over cookies, then stand on the glowing pad to feed him.",
-	TextColor3 = Color3.fromRGB(190, 186, 205),
-	TextXAlignment = Enum.TextXAlignment.Left,
+local _, setCarry = UI.bar(hud, {
+	color = Theme.color.cookie,
+	height = 14,
+	props = { Name = "CarryBar", Position = UDim2.new(0, 0, 0, Theme.space(19)) },
 })
-hintLabel.Parent = panel
+
+-- Feed: the goal you are working toward. Label left, value right.
+local feedName = UI.label(hud, {
+	Name = "FeedName",
+	Position = UDim2.new(0, 0, 0, Theme.space(24)),
+	Size = UDim2.new(1, -120, 0, 22),
+	Font = Theme.font.bold,
+	Text = "BABY BEBEH",
+	TextColor3 = Theme.color.textDim,
+	TextSize = Theme.textSize.sm,
+})
+
+local feedValue = UI.label(hud, {
+	Name = "FeedValue",
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, 0, 0, Theme.space(24)),
+	Size = UDim2.new(0, 160, 0, 22),
+	Font = Theme.font.display,
+	Text = "0",
+	TextSize = Theme.textSize.md,
+	TextXAlignment = Enum.TextXAlignment.Right,
+})
+
+local _, setFeed = UI.bar(hud, {
+	color = Theme.color.hunger,
+	height = 14,
+	props = { Name = "FeedBar", Position = UDim2.new(0, 0, 0, Theme.space(31)) },
+})
 
 -- Shop ---------------------------------------------------------------------
 
@@ -883,33 +892,34 @@ end
 
 local function refreshPanel()
 	local here = currentAreaIndex()
-	areaLabel.Text = `{here}. {GameConfig.Areas[here].Name}`
+	zoneName.Text = string.upper(GameConfig.Areas[here].Name)
+	zoneNumber.Text = `ZONE {here}`
 
 	sprinkleLabel.Text = GameConfig.abbreviate(state.sprinkles)
 	-- The rebirth pill only earns its space once you have actually rebirthed.
 	rebirthPill.Visible = state.rebirths > 0
 	rebirthLabel.Text = `x{GameConfig.getRebirthMultiplier(state)}`
 
-	carryLabel.Text = `🍪 {GameConfig.abbreviate(state.carried)} / {GameConfig.abbreviate(state.capacity)}`
-	local carryRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
-	carryFill.Size = UDim2.fromScale(carryRatio, 1)
-	carryFill.BackgroundColor3 = carryRatio >= 1 and Color3.fromRGB(255, 130, 110) or COOKIE_YELLOW
+	-- The capacity is dimmed inline, so the eye lands on what you are carrying.
+	local capacity = state.capacity or 0
+	local carryRatio = capacity > 0 and state.carried / capacity or 0
+	carryValue.Text = string.format(
+		'%s<font color="#6B6780"> / %s</font>',
+		GameConfig.abbreviate(state.carried),
+		GameConfig.abbreviate(capacity)
+	)
+	setCarry(carryRatio, carryRatio >= 1 and Theme.color.warn or Theme.color.cookie)
 
 	local tracked = trackedAreaIndex()
 	local cfg = GameConfig.Areas[tracked]
 	local fed = state.fed[tracked] or 0
-	hungerLabel.Text = `{cfg.BebehName}  {GameConfig.abbreviate(fed)} / {GameConfig.abbreviate(cfg.HungerGoal)}`
-	hungerFill.Size = UDim2.fromScale(math.clamp(fed / cfg.HungerGoal, 0, 1), 1)
-
-	if carryRatio >= 1 then
-		hintLabel.Text = "Hands full — go feed Big Bebeh!"
-	elseif GameConfig.canRebirth(state) then
-		hintLabel.Text = "BIG BEBEH is full. Open the shop and rebirth!"
-	elseif fed >= cfg.HungerGoal then
-		hintLabel.Text = "He's full! Head through the open gate →"
-	else
-		hintLabel.Text = "Walk over cookies, then stand on the glowing pad to feed him."
-	end
+	feedName.Text = string.upper(cfg.BebehName)
+	feedValue.Text = string.format(
+		'%s<font color="#6B6780"> / %s</font>',
+		GameConfig.abbreviate(fed),
+		GameConfig.abbreviate(cfg.HungerGoal)
+	)
+	setFeed(fed / cfg.HungerGoal)
 end
 
 -- Upgrade board -------------------------------------------------------------
