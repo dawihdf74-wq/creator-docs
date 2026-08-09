@@ -251,6 +251,8 @@ table.insert(PATCHES, {
 teleportToArea pardons the move]],
 	marker = [[
 AntiCheat.pardon]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 	character:PivotTo(CFrame.new(center + Vector3.new(0, 6, 70)))
@@ -269,6 +271,8 @@ table.insert(PATCHES, {
 throttle BuyUpgrade]],
 	marker = [[
 AntiCheat.allow(player, "BuyUpgrade")]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
@@ -293,6 +297,8 @@ table.insert(PATCHES, {
 throttle Rebirth]],
 	marker = [[
 AntiCheat.allow(player, "Rebirth")]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 Remotes.Rebirth.OnServerEvent:Connect(function(player)
@@ -311,6 +317,8 @@ table.insert(PATCHES, {
 throttle SyncState]],
 	marker = [[
 AntiCheat.allow(player, "SyncState")]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 Remotes.SyncState.OnServerEvent:Connect(function(player)
@@ -332,6 +340,8 @@ table.insert(PATCHES, {
 join refuses a locked save]],
 	marker = [[
 player:Kick(refused)]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 local function onPlayerAdded(player: Player)
@@ -362,6 +372,8 @@ table.insert(PATCHES, {
 leaving clears the tracker, and AntiCheat starts]],
 	marker = [[
 AntiCheat.forget]],
+	needs = [[
+require(script.AntiCheat)]],
 	finds = {
 		[[
 Players.PlayerRemoving:Connect(function(player)
@@ -562,6 +574,8 @@ table.insert(PATCHES, {
 building leaderboards per area]],
 	marker = [[
 buildLeaderboards(areaIndex, cfg, folder)]],
+	needs = [[
+local function buildLeaderboards]],
 	finds = {
 		[[
 	buildUpgradeBoard(areaIndex, cfg, folder)
@@ -696,6 +710,8 @@ table.insert(PATCHES, {
 playtime ticking and the leaderboard boards]],
 	marker = [[
 PLAYTIME_TICK]],
+	needs = [[
+require(script.Leaderboard)]],
 	finds = {
 		[[
 AntiCheat.start(function(player)
@@ -882,6 +898,33 @@ for _, patch in PATCHES do
 		say(`SKIP    {patch.label} — already applied.`)
 		skipped += 1
 		continue
+	end
+
+	--[[
+		A patch that adds a call must not be applied unless the thing it calls is
+		already there, and declared BEFORE it -- in Lua a `local function` defined
+		after its call site is simply nil at that point. Half-applying that pair is
+		how a patch turns a working game into "attempt to call a nil value".
+	]]
+	if patch.needs then
+		local needAt = string.find(source, patch.needs, 1, true)
+		if not needAt then
+			say(`BLOCKED {patch.label} — needs "{patch.needs}" first, which is missing. Left alone.`)
+			missed += 1
+			continue
+		end
+		local anchorAt = nil
+		for _, anchor in patch.finds do
+			local a = string.find(source, anchor, 1, true)
+			if a and (not anchorAt or a < anchorAt) then
+				anchorAt = a
+			end
+		end
+		if anchorAt and needAt > anchorAt then
+			say(`BLOCKED {patch.label} — "{patch.needs}" comes after this point, so the call would see nil. Left alone.`)
+			missed += 1
+			continue
+		end
 	end
 
 	-- Several anchors may be listed, one per shape the code has had. Take the

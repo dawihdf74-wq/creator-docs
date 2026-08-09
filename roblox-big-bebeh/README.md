@@ -307,10 +307,18 @@ Step 1 never edits an existing script — those carry your own changes, and
 overwriting them to save a few edits is a bad trade. It reports which hook-ins
 are missing instead, and step 2 applies exactly those.
 
+If a step ever reports `BLOCKED` or `MISSED`, stop and read it: something in
+your copy has drifted from what the patch expected. `tools/3_RepairWorldBuilder.lua`
+puts a known-good `WorldBuilder` back if that one gets mangled — it is generated
+map code with nothing of yours in it, so replacing it wholesale is safe.
+
 Step 2 is anchored find/replace: each change matches one exact region, skips
 anything already applied, and reports a miss rather than guessing — including
 when an anchor matches twice, since picking one at random is worse than doing
-nothing. Both are safe to re-run, and both print a report and return it, so a
+nothing. A patch that inserts a *call* also refuses to apply unless the patch
+that inserts the *definition* already landed, and landed above it — in Lua a
+`local function` declared after its call site is nil there, so half-applying
+that pair turns a working game into "attempt to call a nil value". Both are safe to re-run, and both print a report and return it, so a
 bridge plugin shows the result in its own box.
 
 ## Installing from scratch
