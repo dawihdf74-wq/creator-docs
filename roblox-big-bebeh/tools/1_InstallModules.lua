@@ -1,15 +1,22 @@
 --[[
-	Big Bebeh — install the anti-cheat modules.
+	Big Bebeh — STEP 1 of 2: install the server modules.
 
-	Paste into the Mango bridge (or the Studio Command Bar) and run once.
+	Paste into the Mango bridge (or the Studio Command Bar) and run.
+	Then run 2_PatchHooks to wire them in.
 
-	It CREATES two ModuleScripts under ServerScriptService.BigBebehGame. It does
-	NOT edit PlayerState or the server script: those carry your own changes, and
-	overwriting them to save you four small edits is a bad trade. Instead it reads
-	them, works out which hook-ins are already in place, and prints the rest.
+	CREATES these ModuleScripts under ServerScriptService.BigBebehGame:
 
-	Re-running is safe. Existing modules are updated in place, so the script is
-	the same whether this is a first install or a version bump.
+	  SessionLock   stops cross-server duplication
+	  AntiCheat     throttling, movement checks, Discord reports
+	  Leaderboard   the global top-ten boards
+
+	It does NOT edit your existing scripts. Those carry your own changes, and
+	overwriting them to save you a few edits is a bad trade. Instead it reads
+	them, works out which hook-ins are already in place, and lists the rest --
+	which is what step 2 applies.
+
+	Re-running is safe. Existing modules are updated in place, so this is the same
+	paste whether it is a first install or a version bump.
 ]]
 
 local ServerScriptService = game:GetService("ServerScriptService")
@@ -1024,7 +1031,7 @@ if anti and string.find(anti.Source, 'AntiCheat.WebhookUrl = ""', 1, true) then
 	say("NOTE    No webhook set yet — reports go to Output. Set AntiCheat.WebhookUrl to your proxy url.")
 end
 
-print("=== Big Bebeh anti-cheat install ===")
+print("=== Big Bebeh — install modules ===")
 for _, line in report do
 	print("  " .. line)
 end
@@ -1036,7 +1043,7 @@ for _, line in report do
 	end
 end
 if todo > 0 then
-	say("NEXT    Run PatchAntiCheatHooks to apply those automatically.")
+	say("NEXT    Run 2_PatchHooks to apply those automatically.")
 end
 
 local summary = if todo == 0 then "ALL HOOKS PRESENT" else `{todo} hook-in(s) still to add`

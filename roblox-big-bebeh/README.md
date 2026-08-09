@@ -292,7 +292,28 @@ rate-limited by Discord and drowns the channel. Each report carries the display
 name, @username, user id, a profile link, the strike count, and the numbers that
 triggered it.
 
-## Installing
+## Installing into an existing place
+
+If the game is already in Studio and you just want the newer systems, two
+scripts do it. Paste each into the Studio Command Bar (or a bridge plugin) and
+run them **in order**:
+
+| Script | What it does |
+|---|---|
+| `tools/1_InstallModules.lua` | creates `SessionLock`, `AntiCheat` and `Leaderboard` under `ServerScriptService.BigBebehGame` |
+| `tools/2_PatchHooks.lua` | wires them into `GameConfig`, `WorldBuilder`, `PlayerState` and the `BigBebehGame` script |
+
+Step 1 never edits an existing script — those carry your own changes, and
+overwriting them to save a few edits is a bad trade. It reports which hook-ins
+are missing instead, and step 2 applies exactly those.
+
+Step 2 is anchored find/replace: each change matches one exact region, skips
+anything already applied, and reports a miss rather than guessing — including
+when an anchor matches twice, since picking one at random is worse than doing
+nothing. Both are safe to re-run, and both print a report and return it, so a
+bridge plugin shows the result in its own box.
+
+## Installing from scratch
 
 ### Option A — open the place file (easiest)
 

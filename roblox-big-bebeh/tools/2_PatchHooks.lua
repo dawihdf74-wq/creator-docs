@@ -1,7 +1,9 @@
 --[[
-	Big Bebeh — apply the anti-cheat hook-ins.
+	Big Bebeh — STEP 2 of 2: wire the modules into your scripts.
 
-	Run InstallAntiCheat first (it creates the modules); this wires them in.
+	Run 1_InstallModules first (it creates the modules); this connects them.
+
+	Touches GameConfig, WorldBuilder, PlayerState and the BigBebehGame script.
 
 	Every change here is an anchored find/replace. It matches an exact region of
 	your script, and if that region is not there verbatim it reports the miss
@@ -920,7 +922,7 @@ end
 local summary = `{applied} applied, {skipped} already there, {missed} need doing by hand`
 say(summary)
 
-print("=== Big Bebeh hook-in patch ===")
+print("=== Big Bebeh — patch hooks ===")
 for _, line in report do
 	print("  " .. line)
 end
