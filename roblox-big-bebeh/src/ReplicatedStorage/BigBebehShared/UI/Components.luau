@@ -246,4 +246,129 @@ function Components.button(parent: Instance, config: {
 	return button
 end
 
+--[[
+	A coloured icon square. Carries the identity of a row or stat so the text
+	beside it can stay plain white and readable rather than tinted until it
+	fails contrast.
+]]
+function Components.chip(parent: Instance, config: {
+	icon: string,
+	color: Color3,
+	size: number?,
+	props: { [string]: any }?,
+}): Frame
+	local side = config.size or 38
+	local chip = Instance.new("Frame")
+	chip.BackgroundColor3 = config.color
+	chip.BorderSizePixel = 0
+	chip.Size = UDim2.fromOffset(side, side)
+	apply(chip, config.props)
+	chip.Parent = parent
+	round(chip, Theme.radius.sm)
+	sheen(chip, 0.8)
+
+	Components.label(chip, {
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.font.display,
+		Text = config.icon,
+		TextSize = math.floor(side * 0.52),
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	return chip
+end
+
+-- A list row: the surface an entry in a scrolling list sits on.
+function Components.row(parent: Instance, props: { [string]: any }?): Frame
+	local row = Instance.new("Frame")
+	row.BackgroundColor3 = Theme.color.surfaceAlt
+	row.BorderSizePixel = 0
+	row.Size = UDim2.new(1, -6, 0, 84)
+	apply(row, props)
+	row.Parent = parent
+	round(row, Theme.radius.md)
+	outline(row, Theme.stroke.thin)
+	sheen(row, Theme.sheen.row)
+	return row
+end
+
+--[[
+	A centred modal: panel, header strip with a title and close button, and a
+	body to fill. Returns all three so a caller can drop extras into the header
+	without every screen re-inventing its own chrome.
+]]
+function Components.modal(parent: Instance, config: {
+	title: string,
+	accent: Color3?,
+	size: UDim2?,
+	onClose: (() -> ())?,
+	props: { [string]: any }?,
+}): (Frame, Frame, Frame)
+	local panel = Components.panel(parent, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = config.size or UDim2.fromOffset(520, 560),
+		Visible = false,
+	})
+	apply(panel, config.props)
+	Components.padding(panel, 4)
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 48)
+	header.Parent = panel
+
+	Components.label(header, {
+		Name = "Title",
+		Size = UDim2.new(1, -180, 1, 0),
+		Font = Theme.font.display,
+		Text = config.title,
+		TextColor3 = config.accent or Theme.color.text,
+		TextSize = Theme.textSize.xl,
+		TextStrokeTransparency = 0.5,
+	})
+
+	Components.button(header, {
+		text = "✕",
+		color = Theme.color.bad,
+		props = {
+			Name = "Close",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(46, 46),
+		},
+		onClick = function()
+			panel.Visible = false
+			if config.onClose then
+				config.onClose()
+			end
+		end,
+	})
+
+	local body = Instance.new("Frame")
+	body.Name = "Body"
+	body.BackgroundTransparency = 1
+	body.Position = UDim2.new(0, 0, 0, Theme.space(14))
+	body.Size = UDim2.new(1, 0, 1, -Theme.space(14))
+	body.Parent = panel
+
+	return panel, body, header
+end
+
+-- A scrolling column, sized to its contents.
+function Components.scroller(parent: Instance, gapSteps: number, props: { [string]: any }?): ScrollingFrame
+	local scroller = Instance.new("ScrollingFrame")
+	scroller.BackgroundTransparency = 1
+	scroller.BorderSizePixel = 0
+	scroller.ScrollBarThickness = 4
+	scroller.ScrollBarImageColor3 = Theme.color.surfaceHi
+	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroller.CanvasSize = UDim2.new()
+	scroller.Size = UDim2.fromScale(1, 1)
+	apply(scroller, props)
+	scroller.Parent = parent
+	Components.list(scroller, gapSteps)
+	return scroller
+end
+
 return Components

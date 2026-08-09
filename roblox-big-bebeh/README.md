@@ -157,8 +157,14 @@ and cannot forget to clamp. `button` captures its rest size once for the press
 animation — reading `Size` at click time would measure a half-finished tween and
 the button would shrink a little with every press.
 
-Migrated so far: the currency rail. The rest of the HUD still uses the older
-inline helpers and is being converted screen by screen.
+`modal` is the shared shell for full-screen menus — panel, header with title
+and close button, and a body to fill — so the shop and rune screens do not each
+re-invent their own chrome. `chip`, `row` and `scroller` cover the rest of what
+a list screen needs.
+
+Every screen is now on the system: currency rail, bottom HUD, shop, rune menu
+and the world upgrade board. The old inline helpers are gone, so there is one
+definition of a panel, a button and a bar in the whole project.
 
 ## Seeing the map in Studio
 

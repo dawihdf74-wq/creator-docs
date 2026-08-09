@@ -912,6 +912,131 @@ function Components.button(parent: Instance, config: {
 	return button
 end
 
+--[[
+	A coloured icon square. Carries the identity of a row or stat so the text
+	beside it can stay plain white and readable rather than tinted until it
+	fails contrast.
+]]
+function Components.chip(parent: Instance, config: {
+	icon: string,
+	color: Color3,
+	size: number?,
+	props: { [string]: any }?,
+}): Frame
+	local side = config.size or 38
+	local chip = Instance.new("Frame")
+	chip.BackgroundColor3 = config.color
+	chip.BorderSizePixel = 0
+	chip.Size = UDim2.fromOffset(side, side)
+	apply(chip, config.props)
+	chip.Parent = parent
+	round(chip, Theme.radius.sm)
+	sheen(chip, 0.8)
+
+	Components.label(chip, {
+		Size = UDim2.fromScale(1, 1),
+		Font = Theme.font.display,
+		Text = config.icon,
+		TextSize = math.floor(side * 0.52),
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	return chip
+end
+
+-- A list row: the surface an entry in a scrolling list sits on.
+function Components.row(parent: Instance, props: { [string]: any }?): Frame
+	local row = Instance.new("Frame")
+	row.BackgroundColor3 = Theme.color.surfaceAlt
+	row.BorderSizePixel = 0
+	row.Size = UDim2.new(1, -6, 0, 84)
+	apply(row, props)
+	row.Parent = parent
+	round(row, Theme.radius.md)
+	outline(row, Theme.stroke.thin)
+	sheen(row, Theme.sheen.row)
+	return row
+end
+
+--[[
+	A centred modal: panel, header strip with a title and close button, and a
+	body to fill. Returns all three so a caller can drop extras into the header
+	without every screen re-inventing its own chrome.
+]]
+function Components.modal(parent: Instance, config: {
+	title: string,
+	accent: Color3?,
+	size: UDim2?,
+	onClose: (() -> ())?,
+	props: { [string]: any }?,
+}): (Frame, Frame, Frame)
+	local panel = Components.panel(parent, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		Size = config.size or UDim2.fromOffset(520, 560),
+		Visible = false,
+	})
+	apply(panel, config.props)
+	Components.padding(panel, 4)
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 48)
+	header.Parent = panel
+
+	Components.label(header, {
+		Name = "Title",
+		Size = UDim2.new(1, -180, 1, 0),
+		Font = Theme.font.display,
+		Text = config.title,
+		TextColor3 = config.accent or Theme.color.text,
+		TextSize = Theme.textSize.xl,
+		TextStrokeTransparency = 0.5,
+	})
+
+	Components.button(header, {
+		text = "✕",
+		color = Theme.color.bad,
+		props = {
+			Name = "Close",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, 0, 0.5, 0),
+			Size = UDim2.fromOffset(46, 46),
+		},
+		onClick = function()
+			panel.Visible = false
+			if config.onClose then
+				config.onClose()
+			end
+		end,
+	})
+
+	local body = Instance.new("Frame")
+	body.Name = "Body"
+	body.BackgroundTransparency = 1
+	body.Position = UDim2.new(0, 0, 0, Theme.space(14))
+	body.Size = UDim2.new(1, 0, 1, -Theme.space(14))
+	body.Parent = panel
+
+	return panel, body, header
+end
+
+-- A scrolling column, sized to its contents.
+function Components.scroller(parent: Instance, gapSteps: number, props: { [string]: any }?): ScrollingFrame
+	local scroller = Instance.new("ScrollingFrame")
+	scroller.BackgroundTransparency = 1
+	scroller.BorderSizePixel = 0
+	scroller.ScrollBarThickness = 4
+	scroller.ScrollBarImageColor3 = Theme.color.surfaceHi
+	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroller.CanvasSize = UDim2.new()
+	scroller.Size = UDim2.fromScale(1, 1)
+	apply(scroller, props)
+	scroller.Parent = parent
+	Components.list(scroller, gapSteps)
+	return scroller
+end
+
 return Components
 ]]></ProtectedString>
 </Properties>
@@ -2837,19 +2962,6 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local camera = workspace.CurrentCamera
 
--- Palette. Simulator UI leans on a few saturated accents against a near-black
--- panel, with every surface outlined -- flat fills with no outline are what
--- make a menu look unfinished.
-local COOKIE_YELLOW = Color3.fromRGB(255, 206, 92)
-local SPRINKLE_PINK = Color3.fromRGB(255, 132, 214)
-local RUNE_PURPLE = Color3.fromRGB(176, 132, 255)
-local PANEL_BG = Color3.fromRGB(19, 17, 28)
-local ROW_BG = Color3.fromRGB(36, 32, 52)
-local OUTLINE = Color3.fromRGB(8, 7, 14)
-local TEXT_DIM = Color3.fromRGB(150, 145, 172)
-local AFFORD_GREEN = Color3.fromRGB(72, 200, 116)
-local DENY_GREY = Color3.fromRGB(70, 66, 86)
-
 local state = {
 	maxArea = 1,
 	carried = 0,
@@ -2862,101 +2974,6 @@ local state = {
 	runes = {},
 	runesOpened = 0,
 }
-
--- UI helpers ---------------------------------------------------------------
-
-local function corner(parent: Instance, radius: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
-	return c
-end
-
--- A crisp dark outline. Roblox UI reads as flat without one.
-local function stroke(inst: Instance, thickness: number, color: Color3?, transparency: number?)
-	local s = Instance.new("UIStroke")
-	s.Thickness = thickness
-	s.Color = color or OUTLINE
-	s.Transparency = transparency or 0
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = inst
-	return s
-end
-
---[[
-	Vertical sheen. UIGradient multiplies the fill, so 1 leaves a colour alone
-	and anything lower darkens it -- the top stays put and the bottom falls away.
-
-	ColorSequence rejects channel values outside 0-1 outright, and an attempt to
-	brighten with 1.12 threw here and killed the rest of the HUD. Clamping keeps
-	a stray value from taking the whole script down again.
-]]
-local function gradient(inst: Instance, top: number, bottom: number, rotation: number?)
-	local function grey(v: number): Color3
-		local c = math.clamp(v, 0, 1)
-		return Color3.new(c, c, c)
-	end
-	local g = Instance.new("UIGradient")
-	g.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, grey(top)),
-		ColorSequenceKeypoint.new(1, grey(bottom)),
-	})
-	g.Rotation = rotation or 90
-	g.Parent = inst
-	return g
-end
-
--- The standard container: dark, outlined and softly lit. Depth comes from the
--- stroke rather than a second Frame, so there is no ZIndex or visibility
--- bookkeeping to get wrong.
-local function newPanel(parent: Instance, props: { [string]: any }): Frame
-	local frame = Instance.new("Frame")
-	frame.BackgroundColor3 = PANEL_BG
-	frame.BorderSizePixel = 0
-	for k, v in props do
-		(frame :: any)[k] = v
-	end
-	frame.Parent = parent
-	corner(frame, 14)
-	stroke(frame, 3)
-	gradient(frame, 1, 0.82)
-	return frame
-end
-
--- Chunky pill button with a lighter top face, like the buy buttons in the genre.
-local function newBigButton(parent: Instance, props: { [string]: any }): TextButton
-	local button = Instance.new("TextButton")
-	button.Font = Enum.Font.FredokaOne
-	button.TextColor3 = Color3.fromRGB(255, 255, 255)
-	button.TextScaled = true
-	button.AutoButtonColor = true
-	button.BorderSizePixel = 0
-	button.BackgroundColor3 = AFFORD_GREEN
-	for k, v in props do
-		(button :: any)[k] = v
-	end
-	button.Parent = parent
-	corner(button, 11)
-	stroke(button, 3)
-	gradient(button, 1, 0.76)
-
-	local label = Instance.new("UITextSizeConstraint")
-	label.MaxTextSize = 26
-	label.Parent = button
-	return button
-end
-
-local function newLabel(props: { [string]: any }): TextLabel
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.TextScaled = true
-	for k, v in props do
-		(label :: any)[k] = v
-	end
-	return label
-end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "BigBebehHUD"
@@ -3149,433 +3166,354 @@ local _, setFeed = UI.bar(hud, {
 
 -- Shop ---------------------------------------------------------------------
 
-local shopButton = newBigButton(gui, {
-	Name = "ShopButton",
-	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -14, 1, -18),
-	Size = UDim2.new(0, 146, 0, 56),
-	BackgroundColor3 = Color3.fromRGB(236, 92, 138),
-	Text = "🛒 SHOP",
+--[[
+	Upgrade shop. One row per upgrade: identity chip, what it does now, and the
+	price. Rebirth gets its own footer rather than sitting in the list, because
+	it is not a purchase -- it resets your run, and it should not look like the
+	next thing to buy.
+]]
+local shop, shopBody, shopHeader = UI.modal(gui, {
+	title = "UPGRADES",
+	accent = Theme.color.cookie,
+	size = UDim2.fromOffset(560, 596),
+	props = { Name = "Shop" },
 })
 
-local shop = newPanel(gui, {
-	Name = "Shop",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.new(0.5, 0, 0.5, 0),
-	Size = UDim2.new(0, 500, 0, 536),
-	Visible = false,
+local _, shopBalance = UI.pill(shopHeader, {
+	icon = "✦",
+	color = Theme.color.sprinkle,
+	text = "0",
+	props = {
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -Theme.space(14), 0.5, 0),
+		Size = UDim2.fromOffset(150, 42),
+	},
 })
 
-local shopTitle = newLabel({
-	Position = UDim2.new(0, 20, 0, 14),
-	Size = UDim2.new(1, -110, 0, 34),
-	Font = Enum.Font.FredokaOne,
-	Text = "🛒 Upgrade Shop",
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-shopTitle.Parent = shop
-
-local shopPurse = newLabel({
-	Position = UDim2.new(0, 20, 0, 50),
-	Size = UDim2.new(1, -110, 0, 26),
-	Text = "✨ 0 sprinkles",
-	TextColor3 = SPRINKLE_PINK,
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-shopPurse.Parent = shop
-
-local closeButton = newBigButton(shop, {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, -14, 0, 14),
-	Size = UDim2.new(0, 44, 0, 44),
-	BackgroundColor3 = Color3.fromRGB(196, 66, 84),
-	Text = "✕",
+local REBIRTH_FOOTER_H = 84
+local shopList = UI.scroller(shopBody, 2, {
+	Size = UDim2.new(1, 0, 1, -REBIRTH_FOOTER_H),
 })
 
-local list = Instance.new("ScrollingFrame")
-list.Position = UDim2.new(0, 14, 0, 88)
-list.Size = UDim2.new(1, -28, 1, -180)
-list.BackgroundTransparency = 1
-list.BorderSizePixel = 0
-list.ScrollBarThickness = 5
-list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-list.CanvasSize = UDim2.new()
-list.Parent = shop
-
-local listLayout = Instance.new("UIListLayout")
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 8)
-listLayout.Parent = list
-
--- One row per upgrade, built once and refreshed whenever state changes.
-local rows: { [string]: { buy: TextButton, name: TextLabel, effect: TextLabel } } = {}
+local shopRows: { [string]: { level: TextLabel, effect: TextLabel, buy: TextButton } } = {}
 
 for index, upgrade in GameConfig.Upgrades do
-	local row = Instance.new("Frame")
-	row.Name = upgrade.Id
-	row.Size = UDim2.new(1, -6, 0, 82)
-	row.BackgroundColor3 = ROW_BG
-	row.BorderSizePixel = 0
-	row.LayoutOrder = index
-	row.Parent = list
-	corner(row, 12)
-	stroke(row, 2)
-	gradient(row, 1, 0.88)
+	local row = UI.row(shopList, { Name = upgrade.Id, LayoutOrder = index })
 
-	local nameLabel = newLabel({
-		Position = UDim2.new(0, 14, 0, 8),
-		Size = UDim2.new(1, -150, 0, 26),
-		Font = Enum.Font.FredokaOne,
-		Text = `{upgrade.Icon} {upgrade.Name}`,
-		TextXAlignment = Enum.TextXAlignment.Left,
+	UI.chip(row, {
+		icon = upgrade.Icon,
+		color = Theme.color.cookie,
+		size = 44,
+		props = { Position = UDim2.new(0, Theme.space(3), 0.5, -22) },
 	})
-	nameLabel.Parent = row
 
-	local blurb = newLabel({
-		Position = UDim2.new(0, 14, 0, 34),
-		Size = UDim2.new(1, -150, 0, 20),
-		Font = Enum.Font.Gotham,
+	UI.label(row, {
+		Position = UDim2.new(0, Theme.space(15), 0, Theme.space(3)),
+		Size = UDim2.new(1, -Theme.space(47), 0, 22),
+		Font = Theme.font.display,
+		Text = upgrade.Name,
+		TextSize = Theme.textSize.md,
+	})
+
+	local effect = UI.label(row, {
+		Position = UDim2.new(0, Theme.space(15), 0, Theme.space(9)),
+		Size = UDim2.new(1, -Theme.space(47), 0, 20),
+		Font = Theme.font.body,
 		Text = upgrade.Blurb,
-		TextColor3 = Color3.fromRGB(180, 176, 196),
-		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = Theme.color.textDim,
+		TextSize = Theme.textSize.sm,
 	})
-	blurb.Parent = row
 
-	local effect = newLabel({
-		Position = UDim2.new(0, 14, 0, 54),
-		Size = UDim2.new(1, -150, 0, 20),
-		Font = Enum.Font.GothamBold,
+	local level = UI.label(row, {
+		Position = UDim2.new(0, Theme.space(15), 0, Theme.space(14)),
+		Size = UDim2.new(1, -Theme.space(47), 0, 18),
+		Font = Theme.font.bold,
 		Text = "",
-		TextColor3 = COOKIE_YELLOW,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	})
-	effect.Parent = row
-
-	local buy = newBigButton(row, {
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.new(0, 122, 0, 58),
-		BackgroundColor3 = AFFORD_GREEN,
-		Text = "✨ 40",
+		TextColor3 = Theme.color.textFaint,
+		TextSize = Theme.textSize.xs,
 	})
 
-	buy.Activated:Connect(function()
-		Remotes.BuyUpgrade:FireServer(upgrade.Id)
-	end)
+	local buy = UI.button(row, {
+		text = "0",
+		color = Theme.color.good,
+		props = {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -Theme.space(3), 0.5, 0),
+			Size = UDim2.fromOffset(128, 58),
+			TextSize = Theme.textSize.md,
+		},
+		onClick = function()
+			Remotes.BuyUpgrade:FireServer(upgrade.Id)
+		end,
+	})
 
-	rows[upgrade.Id] = { buy = buy, name = nameLabel, effect = effect }
+	shopRows[upgrade.Id] = { level = level, effect = effect, buy = buy }
 end
 
-local rebirthButton = newBigButton(shop, {
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -16),
-	Size = UDim2.new(1, -32, 0, 66),
-	BackgroundColor3 = DENY_GREY,
-	Text = "⭐ REBIRTH",
+-- Rebirth footer, visually separate from the purchase list.
+local rebirthButton = UI.button(shopBody, {
+	text = "REBIRTH",
+	color = Theme.color.muted,
+	props = {
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, 0),
+		Size = UDim2.new(1, -Theme.space(2), 0, 64),
+		TextSize = Theme.textSize.lg,
+	},
+	onClick = function()
+		Remotes.Rebirth:FireServer()
+	end,
 })
 
-rebirthButton.Activated:Connect(function()
-	Remotes.Rebirth:FireServer()
-end)
-
-local function setShopOpen(open: boolean)
-	shop.Visible = open
-end
-
-shopButton.Activated:Connect(function()
-	setShopOpen(not shop.Visible)
-end)
-closeButton.Activated:Connect(function()
-	setShopOpen(false)
-end)
-
-ProximityPromptService.PromptTriggered:Connect(function(prompt)
-	if CollectionService:HasTag(prompt, "ShopPrompt") then
-		setShopOpen(true)
-	end
-end)
-
 local function refreshShop()
-	shopPurse.Text = `✨ {GameConfig.abbreviate(state.sprinkles)} sprinkles`
+	shopBalance.Text = GameConfig.abbreviate(state.sprinkles)
 
 	for _, upgrade in GameConfig.Upgrades do
-		local row = rows[upgrade.Id]
-		local level = GameConfig.getUpgradeLevel(state, upgrade.Id)
+		local row = shopRows[upgrade.Id]
+		local owned = GameConfig.getUpgradeLevel(state, upgrade.Id)
 
-		row.name.Text = `{upgrade.Icon} {upgrade.Name}  ({level}/{upgrade.MaxLevel})`
 		row.effect.Text = GameConfig.describeUpgrade(state, upgrade)
+		row.level.Text = `LEVEL {owned} / {upgrade.MaxLevel}`
 
-		if level >= upgrade.MaxLevel then
+		if owned >= upgrade.MaxLevel then
 			row.buy.Text = "MAX"
-			row.buy.BackgroundColor3 = DENY_GREY
+			row.buy.BackgroundColor3 = Theme.color.muted
 		else
-			local cost = GameConfig.getUpgradeCost(upgrade, level)
-			row.buy.Text = `✨ {GameConfig.abbreviate(cost)}`
-			row.buy.BackgroundColor3 = state.sprinkles >= cost and AFFORD_GREEN or DENY_GREY
+			local price = GameConfig.getUpgradeCost(upgrade, owned)
+			row.buy.Text = `✦ {GameConfig.abbreviate(price)}`
+			-- Affordability is the one thing you scan for, so it is colour-coded.
+			row.buy.BackgroundColor3 = state.sprinkles >= price and Theme.color.good or Theme.color.muted
 		end
 	end
 
 	if GameConfig.canRebirth(state) then
 		local nextMultiplier = 1 + GameConfig.RebirthMultiplierPerLevel * (state.rebirths + 1)
-		rebirthButton.Text = `⭐ REBIRTH → x{nextMultiplier} forever`
-		rebirthButton.BackgroundColor3 = Color3.fromRGB(226, 160, 60)
+		rebirthButton.Text = `★ REBIRTH  →  x{nextMultiplier} FOREVER`
+		rebirthButton.BackgroundColor3 = Theme.color.warn
 	else
-		rebirthButton.Text = "⭐ Fill BIG BEBEH to rebirth"
-		rebirthButton.BackgroundColor3 = DENY_GREY
+		rebirthButton.Text = "★ FILL BIG BEBEH TO REBIRTH"
+		rebirthButton.BackgroundColor3 = Theme.color.muted
 	end
 end
+
+local _shopButton = UI.button(gui, {
+	text = "SHOP",
+	color = Theme.color.sprinkle,
+	props = {
+		Name = "ShopButton",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -Theme.space(4), 1, -Theme.space(5)),
+		Size = UDim2.fromOffset(150, 58),
+	},
+	onClick = function()
+		shop.Visible = not shop.Visible
+		if shop.Visible then
+			refreshShop()
+		end
+	end,
+})
+
+ProximityPromptService.PromptTriggered:Connect(function(prompt)
+	if CollectionService:HasTag(prompt, "ShopPrompt") then
+		shop.Visible = true
+		refreshShop()
+	end
+end)
 
 -- Runes --------------------------------------------------------------------
 
 --[[
-	Two panels, laid out like the rune menus these games use: the ladder on the
-	left (every tier, its odds, how many you hold), a running summary on the
-	right. A strip of family tabs sits above them -- there is one family today,
-	but the menu is built to switch between them.
-]]
+	Rune menu. The ladder on the left is the reference -- every tier, its odds
+	and how many you hold. The right column is the answer to "so what do I have":
+	the totals those runes add up to.
 
+	Family tabs sit above both. There is one family today and the menu is built
+	to switch, so a second is a config entry rather than a rewrite.
+]]
 local selectedRuneType = GameConfig.RuneTypes[1].Id
 local openingSince: number? = nil -- set when the first rune of the session lands
 
-local runeMenu = Instance.new("Frame")
-runeMenu.Name = "RuneMenu"
-runeMenu.AnchorPoint = Vector2.new(0.5, 0.5)
-runeMenu.Position = UDim2.new(0.5, 0, 0.5, 0)
-runeMenu.Size = UDim2.new(0, 780, 0, 546)
-runeMenu.BackgroundTransparency = 1
-runeMenu.Visible = false
-runeMenu.Parent = gui
+local runeMenu, runeBody, _ = UI.modal(gui, {
+	title = "RUNES",
+	accent = Theme.color.rune,
+	size = UDim2.fromOffset(788, 596),
+	props = { Name = "RuneMenu" },
+})
 
--- Family tabs.
 local tabStrip = Instance.new("Frame")
-tabStrip.Size = UDim2.new(1, -64, 0, 46)
-tabStrip.Position = UDim2.new(0, 0, 0, 0)
+tabStrip.Name = "Tabs"
 tabStrip.BackgroundTransparency = 1
-tabStrip.Parent = runeMenu
+tabStrip.Size = UDim2.new(1, 0, 0, 46)
+tabStrip.Parent = runeBody
+UI.list(tabStrip, 2, true)
 
-local tabLayout = Instance.new("UIListLayout")
-tabLayout.FillDirection = Enum.FillDirection.Horizontal
-tabLayout.Padding = UDim.new(0, 8)
-tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-tabLayout.Parent = tabStrip
+local columns = Instance.new("Frame")
+columns.Name = "Columns"
+columns.BackgroundTransparency = 1
+columns.Position = UDim2.new(0, 0, 0, Theme.space(14))
+columns.Size = UDim2.new(1, 0, 1, -Theme.space(14))
+columns.Parent = runeBody
 
-local runeClose = newBigButton(runeMenu, {
-	AnchorPoint = Vector2.new(1, 0),
-	Position = UDim2.new(1, 0, 0, 0),
-	Size = UDim2.new(0, 46, 0, 46),
-	BackgroundColor3 = Color3.fromRGB(196, 66, 84),
-	Text = "✕",
+local ladderHead = UI.label(columns, {
+	Size = UDim2.new(0.58, -Theme.space(2), 0, 20),
+	Font = Theme.font.bold,
+	Text = "LADDER",
+	TextColor3 = Theme.color.textFaint,
+	TextSize = Theme.textSize.xs,
 })
 
--- Left: the ladder.
-local ladderPanel = newPanel(runeMenu, {
-	Position = UDim2.new(0, 0, 0, 58),
-	Size = UDim2.new(0, 452, 1, -58),
+local ladder = UI.scroller(columns, 2, {
+	Position = UDim2.new(0, 0, 0, Theme.space(7)),
+	Size = UDim2.new(0.58, -Theme.space(2), 1, -Theme.space(7)),
 })
 
-local ladderTitle = newLabel({
-	Position = UDim2.new(0, 16, 0, 14),
-	Size = UDim2.new(1, -32, 0, 38),
-	Font = Enum.Font.FredokaOne,
-	Text = "Cookie Rune",
-	TextColor3 = COOKIE_YELLOW,
-	TextStrokeTransparency = 0.4,
-})
-ladderTitle.Parent = ladderPanel
+local statsPanel = Instance.new("Frame")
+statsPanel.Name = "Stats"
+statsPanel.BackgroundColor3 = Theme.color.bg
+statsPanel.BorderSizePixel = 0
+statsPanel.AnchorPoint = Vector2.new(1, 0)
+statsPanel.Position = UDim2.new(1, 0, 0, 0)
+statsPanel.Size = UDim2.new(0.42, -Theme.space(2), 1, 0)
+statsPanel.Parent = columns
+UI.round(statsPanel, Theme.radius.md)
+UI.outline(statsPanel, Theme.stroke.thin, Theme.color.surfaceHi)
+UI.padding(statsPanel, 4)
 
-local ladderSubtitle = newLabel({
-	Position = UDim2.new(0, 16, 0, 52),
-	Size = UDim2.new(1, -32, 0, 24),
-	Font = Enum.Font.GothamBold,
-	Text = "0 Opened",
-	TextColor3 = TEXT_DIM,
-})
-ladderSubtitle.Parent = ladderPanel
-
-local ladderList = Instance.new("ScrollingFrame")
-ladderList.Position = UDim2.new(0, 12, 0, 84)
-ladderList.Size = UDim2.new(1, -24, 1, -96)
-ladderList.BackgroundTransparency = 1
-ladderList.BorderSizePixel = 0
-ladderList.ScrollBarThickness = 4
-ladderList.ScrollBarImageColor3 = RUNE_PURPLE
-ladderList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-ladderList.CanvasSize = UDim2.new()
-ladderList.Parent = ladderPanel
-
-local ladderLayout = Instance.new("UIListLayout")
-ladderLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ladderLayout.Padding = UDim.new(0, 6)
-ladderLayout.Parent = ladderList
-
--- Right: the summary.
-local statsPanel = newPanel(runeMenu, {
-	Position = UDim2.new(0, 466, 0, 58),
-	Size = UDim2.new(1, -466, 1, -58),
+local statsOpened = UI.label(statsPanel, {
+	Size = UDim2.new(1, 0, 0, 34),
+	Font = Theme.font.display,
+	Text = "0",
+	TextColor3 = Theme.color.rune,
+	TextSize = Theme.textSize.xl,
 })
 
-local statsTitle = newLabel({
-	Position = UDim2.new(0, 14, 0, 14),
-	Size = UDim2.new(1, -28, 0, 34),
-	Font = Enum.Font.FredokaOne,
-	Text = "Cookie Rune",
-	TextColor3 = COOKIE_YELLOW,
-	TextStrokeTransparency = 0.4,
+local _statsOpenedCaption = UI.label(statsPanel, {
+	Position = UDim2.new(0, 0, 0, Theme.space(8)),
+	Size = UDim2.new(1, 0, 0, 18),
+	Font = Theme.font.bold,
+	Text = "RUNES OPENED",
+	TextColor3 = Theme.color.textFaint,
+	TextSize = Theme.textSize.xs,
 })
-statsTitle.Parent = statsPanel
 
-local statsSince = newLabel({
-	Position = UDim2.new(0, 14, 0, 52),
-	Size = UDim2.new(1, -28, 0, 22),
-	Font = Enum.Font.Gotham,
+local statsSince = UI.label(statsPanel, {
+	Position = UDim2.new(0, 0, 0, Theme.space(13)),
+	Size = UDim2.new(1, 0, 0, 18),
+	Font = Theme.font.body,
 	Text = "Not opening",
-	TextColor3 = TEXT_DIM,
+	TextColor3 = Theme.color.textDim,
+	TextSize = Theme.textSize.xs,
 })
-statsSince.Parent = statsPanel
 
-local statsOpened = newLabel({
-	Position = UDim2.new(0, 14, 0, 76),
-	Size = UDim2.new(1, -28, 0, 26),
-	Font = Enum.Font.GothamBold,
-	Text = "Opened 0",
-	TextColor3 = COOKIE_YELLOW,
+-- The three totals a player actually acts on.
+local _totalsHead = UI.label(statsPanel, {
+	Position = UDim2.new(0, 0, 0, Theme.space(19)),
+	Size = UDim2.new(1, 0, 0, 18),
+	Font = Theme.font.bold,
+	Text = "TOTALS",
+	TextColor3 = Theme.color.textFaint,
+	TextSize = Theme.textSize.xs,
 })
-statsOpened.Parent = statsPanel
 
-local statsLuck = newLabel({
-	Position = UDim2.new(0, 14, 0, 106),
-	Size = UDim2.new(1, -28, 0, 26),
-	Font = Enum.Font.FredokaOne,
-	Text = "x1 Rune Luck",
-	TextColor3 = RUNE_PURPLE,
-})
-statsLuck.Parent = statsPanel
+local totalRows = {}
+for i, spec in {
+	{ key = "cookie", icon = "🍪", label = "Cookies", color = Theme.color.cookie },
+	{ key = "luck", icon = "✦", label = "Rune Luck", color = Theme.color.rune },
+	{ key = "bulk", icon = "⛏", label = "Bulk", color = Theme.color.good },
+	{ key = "clone", icon = "❖", label = "Clone", color = Theme.color.sprinkle },
+} do
+	local y = Theme.space(24 + (i - 1) * 11)
+	UI.chip(statsPanel, {
+		icon = spec.icon,
+		color = spec.color,
+		size = 32,
+		props = { Position = UDim2.new(0, 0, 0, y) },
+	})
+	UI.label(statsPanel, {
+		Position = UDim2.new(0, Theme.space(10), 0, y),
+		Size = UDim2.new(1, -Theme.space(10), 0, 16),
+		Font = Theme.font.bold,
+		Text = string.upper(spec.label),
+		TextColor3 = Theme.color.textFaint,
+		TextSize = Theme.textSize.xs,
+	})
+	totalRows[spec.key] = UI.label(statsPanel, {
+		Position = UDim2.new(0, Theme.space(10), 0, y + 15),
+		Size = UDim2.new(1, -Theme.space(10), 0, 18),
+		Font = Theme.font.display,
+		Text = "-",
+		TextSize = Theme.textSize.md,
+	})
+end
 
-local statsNote = newLabel({
-	Position = UDim2.new(0, 14, 0, 136),
-	Size = UDim2.new(1, -28, 0, 46),
-	Font = Enum.Font.Gotham,
-	Text = "",
-	TextColor3 = Color3.fromRGB(112, 108, 132),
-	TextScaled = false,
-	TextSize = 13,
-	TextWrapped = true,
-})
-statsNote.Parent = statsPanel
-
-local earnedHeader = newLabel({
-	Position = UDim2.new(0, 14, 0, 188),
-	Size = UDim2.new(1, -28, 0, 26),
-	Font = Enum.Font.FredokaOne,
-	Text = "Earned Runes:",
-	TextColor3 = Color3.fromRGB(236, 232, 250),
-	TextXAlignment = Enum.TextXAlignment.Left,
-})
-earnedHeader.Parent = statsPanel
-
-local earnedList = Instance.new("Frame")
-earnedList.Position = UDim2.new(0, 14, 0, 218)
-earnedList.Size = UDim2.new(1, -28, 1, -280)
-earnedList.BackgroundTransparency = 1
-earnedList.Parent = statsPanel
-
-local earnedLayout = Instance.new("UIListLayout")
-earnedLayout.SortOrder = Enum.SortOrder.LayoutOrder
-earnedLayout.Padding = UDim.new(0, 4)
-earnedLayout.Parent = earnedList
-
-local boostSummary = newLabel({
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -12),
-	Size = UDim2.new(1, -28, 0, 48),
-	Font = Enum.Font.FredokaOne,
-	Text = "",
-	TextColor3 = COOKIE_YELLOW,
-	TextScaled = false,
-	TextSize = 19,
-	TextWrapped = true,
-})
-boostSummary.Parent = statsPanel
-
--- Rows, rebuilt whenever the selected family changes.
-local ladderRows: { [string]: TextLabel } = {}
-local earnedRows: { [string]: TextLabel } = {}
+-- Ladder rows, rebuilt when the family changes.
+local ladderRows: { [string]: { count: TextLabel, boost: TextLabel } } = {}
 
 local function buildRuneRows()
-	for _, child in ladderList:GetChildren() do
-		if not child:IsA("UIListLayout") then
-			child:Destroy()
-		end
-	end
-	for _, child in earnedList:GetChildren() do
+	for _, child in ladder:GetChildren() do
 		if not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
 	end
 	table.clear(ladderRows)
-	table.clear(earnedRows)
 
 	for index, rune in GameConfig.getRunesOfType(selectedRuneType) do
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, -4, 0, 42)
-		row.BackgroundColor3 = ROW_BG
-		row.BorderSizePixel = 0
-		row.LayoutOrder = index
-		row.Parent = ladderList
-		corner(row, 9)
-		stroke(row, 2)
+		local row = UI.row(ladder, { Name = rune.Id, LayoutOrder = index, Size = UDim2.new(1, -6, 0, 62) })
 
-		local pip = Instance.new("Frame")
-		pip.Size = UDim2.new(0, 5, 1, -14)
-		pip.Position = UDim2.new(0, 8, 0, 7)
-		pip.BackgroundColor3 = rune.Color
-		pip.BorderSizePixel = 0
-		pip.Parent = row
-		corner(pip, 3)
+		-- The rarity colour lives on a bar down the edge, so the name can stay
+		-- white and legible instead of being tinted to the point of straining.
+		local edge = Instance.new("Frame")
+		edge.Size = UDim2.new(0, 6, 1, -Theme.space(4))
+		edge.Position = UDim2.new(0, Theme.space(2), 0, Theme.space(2))
+		edge.BackgroundColor3 = rune.Color
+		edge.BorderSizePixel = 0
+		edge.Parent = row
+		UI.round(edge, 3)
 
-		local label = newLabel({
-			Position = UDim2.new(0, 20, 0, 0),
-			Size = UDim2.new(1, -32, 1, 0),
-			Font = Enum.Font.GothamBold,
-			Text = "",
+		UI.label(row, {
+			Position = UDim2.new(0, Theme.space(5), 0, Theme.space(2)),
+			Size = UDim2.new(1, -Theme.space(28), 0, 20),
+			Font = Theme.font.display,
+			Text = rune.Name,
 			TextColor3 = rune.Color,
-			TextScaled = false,
-			TextSize = 18,
-			TextStrokeTransparency = 0.6,
-			TextXAlignment = Enum.TextXAlignment.Left,
+			TextSize = Theme.textSize.md,
 		})
-		label.Parent = row
-		ladderRows[rune.Id] = label
 
-		local earned = newLabel({
-			Size = UDim2.new(1, 0, 0, 22),
-			Font = Enum.Font.GothamBold,
+		local boost = UI.label(row, {
+			Position = UDim2.new(0, Theme.space(5), 0, Theme.space(8)),
+			Size = UDim2.new(1, -Theme.space(28), 0, 18),
+			Font = Theme.font.body,
 			Text = "",
-			TextColor3 = rune.Color,
-			TextScaled = false,
-			TextSize = 16,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			LayoutOrder = index,
+			TextColor3 = Theme.color.textDim,
+			TextSize = Theme.textSize.xs,
 		})
-		earned.Parent = earnedList
-		earnedRows[rune.Id] = earned
+
+		local count = UI.label(row, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -Theme.space(3), 0.5, 0),
+			Size = UDim2.new(0, 96, 0, 30),
+			Font = Theme.font.display,
+			Text = "0",
+			TextSize = Theme.textSize.lg,
+			TextXAlignment = Enum.TextXAlignment.Right,
+		})
+
+		ladderRows[rune.Id] = { count = count, boost = boost }
 	end
 end
 
 local function elapsedText(): string
 	if not openingSince then
-		return "Not opening — stand on the altar"
+		return "Stand on the altar to open"
 	end
 	local secs = math.max(0, math.floor(os.clock() - openingSince))
-	local h = secs // 3600
-	local m = (secs % 3600) // 60
-	local s = secs % 60
+	local h, m, s = secs // 3600, (secs % 3600) // 60, secs % 60
 	if h > 0 then
-		return `Opening since {h}h {m}m {s}s`
+		return `Opening for {h}h {m}m`
 	elseif m > 0 then
-		return `Opening since {m}m {s}s`
+		return `Opening for {m}m {s}s`
 	end
-	return `Opening since {s}s`
+	return `Opening for {s}s`
 end
 
 local function refreshRunes()
@@ -3584,82 +3522,67 @@ local function refreshRunes()
 		return
 	end
 
-	ladderTitle.Text = runeType.Name
-	ladderTitle.TextColor3 = runeType.Color
-	statsTitle.Text = runeType.Name
-	statsTitle.TextColor3 = runeType.Color
-	statsNote.Text = runeType.Blurb
-	ladderSubtitle.Text = `{GameConfig.abbreviate(state.runesOpened or 0)} Opened`
-
-	statsSince.Text = elapsedText()
-	statsOpened.Text = `Opened {GameConfig.abbreviate(state.runesOpened or 0)}`
+	ladderHead.Text = string.upper(runeType.Name)
+	statsOpened.Text = GameConfig.abbreviate(state.runesOpened or 0)
 	statsOpened.TextColor3 = runeType.Color
-	statsLuck.Text = `x{string.format("%.2g", GameConfig.getRuneLuck(state))} Rune Luck`
+	statsSince.Text = elapsedText()
+
+	totalRows.cookie.Text = `x{string.format("%.2f", GameConfig.getCookieMultiplier(state))}`
+	totalRows.luck.Text = `x{string.format("%.2f", GameConfig.getRuneLuck(state))}`
+	totalRows.bulk.Text = `{GameConfig.getRuneBulk(state)} per open`
+	totalRows.clone.Text = `{math.floor(GameConfig.getRuneCloneChance(state) * 100)}%`
 
 	for _, rune in GameConfig.getRunesOfType(selectedRuneType) do
-		local count = GameConfig.getRuneCount(state, rune.Id)
-		local boost = GameConfig.getRuneBoost(rune, count)
+		local row = ladderRows[rune.Id]
+		if not row then
+			continue
+		end
+		local owned = GameConfig.getRuneCount(state, rune.Id)
+		local boost = GameConfig.getRuneBoost(rune, owned)
 		local effect = GameConfig.RuneEffectNames[rune.Effect] or rune.Effect
 
-		local row = ladderRows[rune.Id]
-		if row then
-			row.Text = `{rune.Name} [1/{rune.Odds}] (x{GameConfig.abbreviate(count)})`
-			row.TextTransparency = count > 0 and 0 or 0.45
-		end
-
-		local earned = earnedRows[rune.Id]
-		if earned then
-			if count > 0 then
-				local maxed = count >= rune.MaxStack and "  MAX" or ""
-				earned.Text = `{rune.Name}: {GameConfig.abbreviate(count)}   +x{string.format("%.2f", boost)} {effect}{maxed}`
-				earned.TextTransparency = 0
-			else
-				earned.Text = `{rune.Name}: —`
-				earned.TextTransparency = 0.55
-			end
+		row.count.Text = GameConfig.abbreviate(owned)
+		-- Tiers you have never seen stay dimmed, so the ladder shows progress.
+		row.count.TextTransparency = owned > 0 and 0 or 0.6
+		if owned >= rune.MaxStack then
+			row.boost.Text = `1/{rune.Odds}  ·  MAXED  ·  +x{string.format("%.2f", boost)} {effect}`
+		else
+			row.boost.Text = `1/{rune.Odds}  ·  +x{string.format("%.2f", boost)} {effect}`
 		end
 	end
-
-	boostSummary.Text = `🍪 x{string.format("%.2f", GameConfig.getCookieMultiplier(state))} cookies`
-		.. `   ·   ⛏ {GameConfig.getRuneBulk(state)}x bulk`
-		.. `   ·   ❖ {math.floor(GameConfig.getRuneCloneChance(state) * 100)}% clone`
 end
 
--- Family tabs, one per rune family.
 for index, runeType in GameConfig.RuneTypes do
-	local tab = newBigButton(tabStrip, {
-		Size = UDim2.new(0, 190, 1, 0),
-		BackgroundColor3 = runeType.Color,
-		Text = `{runeType.Icon} {runeType.Name}`,
-		LayoutOrder = index,
+	UI.button(tabStrip, {
+		text = `{runeType.Icon} {string.upper(runeType.Name)}`,
+		color = runeType.Color,
+		props = { Size = UDim2.fromOffset(210, 46), LayoutOrder = index, TextSize = Theme.textSize.md },
+		onClick = function()
+			selectedRuneType = runeType.Id
+			buildRuneRows()
+			refreshRunes()
+		end,
 	})
-	tab.Activated:Connect(function()
-		selectedRuneType = runeType.Id
-		buildRuneRows()
-		refreshRunes()
-	end)
 end
 
 buildRuneRows()
 
-local runesButton = newBigButton(gui, {
-	Name = "RunesButton",
-	AnchorPoint = Vector2.new(1, 1),
-	Position = UDim2.new(1, -168, 1, -18),
-	Size = UDim2.new(0, 146, 0, 56),
-	BackgroundColor3 = RUNE_PURPLE,
-	Text = "✦ RUNES",
+local _runesButton = UI.button(gui, {
+	text = "✦ RUNES",
+	color = Theme.color.rune,
+	props = {
+		Name = "RunesButton",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -Theme.space(44), 1, -Theme.space(5)),
+		Size = UDim2.fromOffset(150, 58),
+	},
+	onClick = function()
+		runeMenu.Visible = not runeMenu.Visible
+		if runeMenu.Visible then
+			refreshRunes()
+		end
+	end,
 })
-
-runesButton.Activated:Connect(function()
-	runeMenu.Visible = not runeMenu.Visible
-	if runeMenu.Visible then
-		refreshRunes()
-	end
-end)
-runeClose.Activated:Connect(function()
-	runeMenu.Visible = false
-end)
 
 -- Keep the session clock ticking while the menu is open.
 task.spawn(function()
@@ -3730,112 +3653,105 @@ end
 -- Upgrade board -------------------------------------------------------------
 
 --[[
-	The board in the world shows the same upgrades as the shop panel. It is drawn
-	client-side onto a SurfaceGui because levels and prices are per-player -- two
-	players standing at the same board must see their own numbers.
-
-	SurfaceGui buttons only receive clicks when the SurfaceGui lives in PlayerGui
-	with Adornee pointing at the part, which is why it is built here rather than
-	by the server.
+	The board in the world shows the same upgrades as the shop panel, one card
+	per upgrade. It is drawn client-side onto a SurfaceGui because levels and
+	prices are per-player -- two players at the same board must see their own
+	numbers -- and because SurfaceGui buttons only take clicks when the GUI lives
+	in PlayerGui with Adornee pointed at the part.
 ]]
-local boardRows: { { level: TextLabel, cost: TextLabel, button: TextButton } } = {}
+local boardRows: { { level: TextLabel, effect: TextLabel, buy: TextButton } } = {}
 
 local function buildBoard(face: BasePart)
 	local surface = Instance.new("SurfaceGui")
 	surface.Name = "UpgradeBoardGui"
 	surface.Adornee = face
 	surface.Face = Enum.NormalId.Front
-	surface.CanvasSize = Vector2.new(920, 400)
+	surface.CanvasSize = Vector2.new(1040, 440)
 	surface.LightInfluence = 0
-	surface.MaxDistance = 160
+	surface.MaxDistance = 170
 	surface.Parent = playerGui
 
 	local bg = Instance.new("Frame")
 	bg.Size = UDim2.fromScale(1, 1)
-	bg.BackgroundColor3 = PANEL_BG
+	bg.BackgroundColor3 = Theme.color.bg
 	bg.BorderSizePixel = 0
 	bg.Parent = surface
-	gradient(bg, 1, 0.84)
+	UI.padding(bg, 5)
 
-	local title = newLabel({
-		Position = UDim2.new(0, 20, 0, 10),
-		Size = UDim2.new(1, -40, 0, 52),
-		Font = Enum.Font.FredokaOne,
-		Text = "🍪 COOKIE UPGRADES",
-		TextColor3 = COOKIE_YELLOW,
-		TextStrokeTransparency = 0.4,
+	UI.label(bg, {
+		Size = UDim2.new(1, 0, 0, 54),
+		Font = Theme.font.display,
+		Text = "COOKIE UPGRADES",
+		TextColor3 = Theme.color.cookie,
+		TextSize = 44,
+		TextXAlignment = Enum.TextXAlignment.Center,
 	})
-	title.Parent = bg
 
 	local grid = Instance.new("Frame")
-	grid.Position = UDim2.new(0, 16, 0, 70)
-	grid.Size = UDim2.new(1, -32, 1, -86)
+	grid.Position = UDim2.new(0, 0, 0, 70)
+	grid.Size = UDim2.new(1, 0, 1, -70)
 	grid.BackgroundTransparency = 1
 	grid.Parent = bg
+	UI.list(grid, 3, true)
 
-	local layout = Instance.new("UIListLayout")
-	layout.FillDirection = Enum.FillDirection.Horizontal
-	layout.Padding = UDim.new(0, 12)
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = grid
-
+	local count = #GameConfig.Upgrades
 	for index, upgrade in GameConfig.Upgrades do
-		local card = Instance.new("Frame")
-		card.Size = UDim2.new(1 / #GameConfig.Upgrades, -12, 1, 0)
-		card.BackgroundColor3 = ROW_BG
-		card.BorderSizePixel = 0
-		card.LayoutOrder = index
-		card.Parent = grid
-		corner(card, 14)
-		stroke(card, 3)
-		gradient(card, 1, 0.86)
-
-		local icon = newLabel({
-			Position = UDim2.new(0, 8, 0, 8),
-			Size = UDim2.new(1, -16, 0, 54),
-			Font = Enum.Font.FredokaOne,
-			Text = upgrade.Icon,
+		local card = UI.row(grid, {
+			LayoutOrder = index,
+			Size = UDim2.new(1 / count, -Theme.space(3), 1, 0),
 		})
-		icon.Parent = card
 
-		local name = newLabel({
-			Position = UDim2.new(0, 8, 0, 62),
-			Size = UDim2.new(1, -16, 0, 34),
-			Font = Enum.Font.FredokaOne,
+		UI.chip(card, {
+			icon = upgrade.Icon,
+			color = Theme.color.cookie,
+			size = 58,
+			props = { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, Theme.space(3)) },
+		})
+
+		UI.label(card, {
+			Position = UDim2.new(0, Theme.space(2), 0, Theme.space(19)),
+			Size = UDim2.new(1, -Theme.space(4), 0, 30),
+			Font = Theme.font.display,
 			Text = upgrade.Name,
-			TextColor3 = COOKIE_YELLOW,
+			TextSize = 24,
+			TextXAlignment = Enum.TextXAlignment.Center,
 		})
-		name.Parent = card
 
-		local level = newLabel({
-			Position = UDim2.new(0, 8, 0, 96),
-			Size = UDim2.new(1, -16, 0, 28),
-			Font = Enum.Font.Gotham,
-			Text = "Level 0",
-			TextColor3 = Color3.fromRGB(190, 186, 205),
-		})
-		level.Parent = card
-
-		local cost = newLabel({
-			Position = UDim2.new(0, 8, 0, 124),
-			Size = UDim2.new(1, -16, 0, 28),
+		local effect = UI.label(card, {
+			Position = UDim2.new(0, Theme.space(2), 0, Theme.space(27)),
+			Size = UDim2.new(1, -Theme.space(4), 0, 24),
+			Font = Theme.font.body,
 			Text = "",
-			TextColor3 = Color3.fromRGB(220, 216, 235),
+			TextColor3 = Theme.color.textDim,
+			TextSize = 18,
+			TextXAlignment = Enum.TextXAlignment.Center,
 		})
-		cost.Parent = card
 
-		local buy = newBigButton(card, {
-			AnchorPoint = Vector2.new(0.5, 1),
-			Position = UDim2.new(0.5, 0, 1, -10),
-			Size = UDim2.new(1, -20, 0, 62),
-			BackgroundColor3 = AFFORD_GREEN,
-			Text = "BUY",
+		local level = UI.label(card, {
+			Position = UDim2.new(0, Theme.space(2), 0, Theme.space(33)),
+			Size = UDim2.new(1, -Theme.space(4), 0, 22),
+			Font = Theme.font.bold,
+			Text = "",
+			TextColor3 = Theme.color.textFaint,
+			TextSize = 16,
+			TextXAlignment = Enum.TextXAlignment.Center,
 		})
-		buy.Activated:Connect(function()
-			Remotes.BuyUpgrade:FireServer(upgrade.Id)
-		end)
 
-		table.insert(boardRows, { level = level, cost = cost, button = buy })
+		local buy = UI.button(card, {
+			text = "0",
+			color = Theme.color.good,
+			props = {
+				AnchorPoint = Vector2.new(0.5, 1),
+				Position = UDim2.new(0.5, 0, 1, -Theme.space(3)),
+				Size = UDim2.new(1, -Theme.space(6), 0, 62),
+				TextSize = 26,
+			},
+			onClick = function()
+				Remotes.BuyUpgrade:FireServer(upgrade.Id)
+			end,
+		})
+
+		table.insert(boardRows, { level = level, effect = effect, buy = buy })
 	end
 end
 
@@ -3846,16 +3762,15 @@ local function refreshBoard()
 			continue
 		end
 		local owned = GameConfig.getUpgradeLevel(state, upgrade.Id)
-		row.level.Text = `Level {owned}/{upgrade.MaxLevel}`
+		row.effect.Text = GameConfig.describeUpgrade(state, upgrade)
+		row.level.Text = `LEVEL {owned} / {upgrade.MaxLevel}`
 		if owned >= upgrade.MaxLevel then
-			row.cost.Text = GameConfig.describeUpgrade(state, upgrade)
-			row.button.Text = "MAX"
-			row.button.BackgroundColor3 = DENY_GREY
+			row.buy.Text = "MAX"
+			row.buy.BackgroundColor3 = Theme.color.muted
 		else
 			local price = GameConfig.getUpgradeCost(upgrade, owned)
-			row.cost.Text = GameConfig.describeUpgrade(state, upgrade)
-			row.button.Text = `✨ {GameConfig.abbreviate(price)}`
-			row.button.BackgroundColor3 = state.sprinkles >= price and AFFORD_GREEN or DENY_GREY
+			row.buy.Text = `✦ {GameConfig.abbreviate(price)}`
+			row.buy.BackgroundColor3 = state.sprinkles >= price and Theme.color.good or Theme.color.muted
 		end
 	end
 end
@@ -3980,27 +3895,26 @@ local toastOrder = 0
 local function showToast(message: string, color: Color3)
 	toastOrder += 1
 
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 0, 34)
-	frame.BackgroundColor3 = PANEL_BG
-	frame.BackgroundTransparency = 0.2
-	frame.BorderSizePixel = 0
-	frame.LayoutOrder = toastOrder
-	frame.Parent = toastHolder
-	corner(frame, 10)
+	local frame = UI.panel(toastHolder, {
+		Size = UDim2.new(1, 0, 0, 38),
+		BackgroundColor3 = Theme.color.surface,
+		LayoutOrder = toastOrder,
+	})
 
-	local label = newLabel({
-		Size = UDim2.new(1, -20, 1, -8),
-		Position = UDim2.new(0, 10, 0, 4),
+	local label = UI.label(frame, {
+		Position = UDim2.new(0, Theme.space(3), 0, 0),
+		Size = UDim2.new(1, -Theme.space(6), 1, 0),
+		Font = Theme.font.display,
 		Text = message,
 		TextColor3 = color,
+		TextSize = Theme.textSize.md,
+		TextXAlignment = Enum.TextXAlignment.Center,
 	})
-	label.Parent = frame
 
 	task.delay(3.5, function()
-		TweenService:Create(frame, TweenInfo.new(0.4), { BackgroundTransparency = 1 }):Play()
-		TweenService:Create(label, TweenInfo.new(0.4), { TextTransparency = 1 }):Play()
-		task.wait(0.45)
+		TweenService:Create(frame, Theme.motion.normal, { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(label, Theme.motion.normal, { TextTransparency = 1 }):Play()
+		task.wait(0.3)
 		frame:Destroy()
 	end)
 end
@@ -4020,18 +3934,23 @@ local function floatText(position: Vector3, text: string, color: Color3)
 	billboard.Adornee = anchor
 	billboard.Parent = anchor
 
-	local label = newLabel({
+	local label = UI.label(billboard, {
 		Size = UDim2.fromScale(1, 1),
-		Font = Enum.Font.FredokaOne,
+		Font = Theme.font.display,
 		Text = text,
 		TextColor3 = color,
+		TextSize = Theme.textSize.lg,
 		TextStrokeTransparency = 0.2,
+		TextXAlignment = Enum.TextXAlignment.Center,
 	})
-	label.Parent = billboard
 
-	local info = TweenInfo.new(0.75, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(anchor, info, { WorldPosition = anchor.WorldPosition + Vector3.new(0, 6, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1, TextStrokeTransparency = 1 }):Play()
+	TweenService:Create(anchor, Theme.motion.pop, {
+		WorldPosition = anchor.WorldPosition + Vector3.new(0, 6, 0),
+	}):Play()
+	TweenService:Create(label, Theme.motion.normal, {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	}):Play()
 	task.delay(0.8, function()
 		anchor:Destroy()
 	end)
@@ -4063,7 +3982,7 @@ Remotes.FeedBurst.OnClientEvent:Connect(function(model: Model, amount: number)
 
 	local emitter = Instance.new("ParticleEmitter")
 	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	emitter.Color = ColorSequence.new(COOKIE_YELLOW)
+	emitter.Color = ColorSequence.new(Theme.color.cookie)
 	emitter.Size = NumberSequence.new(1.5)
 	emitter.Lifetime = NumberRange.new(0.4, 0.8)
 	emitter.Speed = NumberRange.new(8, 16)
