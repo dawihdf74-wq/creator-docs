@@ -778,7 +778,7 @@ check(game_folder, nil, "teleportToArea pardons the move", "AntiCheat.pardon")
 check(game_folder, nil, "BuyUpgrade is throttled", 'AntiCheat.allow(player, "BuyUpgrade")')
 check(game_folder, nil, "Rebirth is throttled", 'AntiCheat.allow(player, "Rebirth")')
 check(game_folder, nil, "SyncState is throttled", 'AntiCheat.allow(player, "SyncState")')
-check(game_folder, nil, "Join refuses a locked save", "PlayerState.load(player)")
+check(game_folder, nil, "Join refuses a locked save", "player:Kick(refused)")
 check(game_folder, nil, "Leaving clears the tracker", "AntiCheat.forget")
 check(game_folder, nil, "AntiCheat.start is called", "AntiCheat.start")
 
@@ -799,7 +799,11 @@ for _, line in report do
 		todo += 1
 	end
 end
-local summary = if todo == 0 then "ALL HOOKS PRESENT" else `{todo} hook-in(s) still to add by hand`
+if todo > 0 then
+	say("NEXT    Run PatchAntiCheatHooks to apply those automatically.")
+end
+
+local summary = if todo == 0 then "ALL HOOKS PRESENT" else `{todo} hook-in(s) still to add`
 print("  " .. summary)
 print("=== end ===")
 
