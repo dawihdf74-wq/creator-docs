@@ -290,7 +290,8 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 
 	-- Hide it, then bring it back somewhere else on the same platform.
 	model.Parent = cookiePool
-	task.delay(GameConfig.CookieRespawnTime, function()
+	-- Whoever picked it up decides how fast it comes back; the cookies are shared.
+	task.delay(GameConfig.getRespawnTime(state), function()
 		if model.Parent == cookiePool then
 			placeCookie(model)
 		end

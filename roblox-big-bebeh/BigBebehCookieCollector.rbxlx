@@ -69,7 +69,10 @@ GameConfig.Areas = {
 		-- Cookies spawn only inside this pit, so the rest of the map is walkable
 		-- space for the board, the altar and the Bebeh.
 		CookiePit = { Center = Vector3.new(0, 0, 18), Size = Vector3.new(76, 76) },
-		BoardOffset = Vector3.new(0, 0, -34), -- board sits on the pit's back edge
+		-- Beside the pit, turned to face it. Standing it in front of the Bebeh
+		-- blocked the view of him.
+		BoardOffset = Vector3.new(-52, 0, 18),
+		BoardYaw = -90,
 		BebehOffset = Vector3.new(0, 0, -74),
 		AltarOffset = Vector3.new(-62, 0, 62),
 		ShopOffset = Vector3.new(62, 0, 62),
@@ -143,6 +146,8 @@ GameConfig.SpeedPerLevel = 2 -- +2 walk speed per level
 GameConfig.MagnetBaseRadius = 9 -- radius at level 1
 GameConfig.MagnetPerLevel = 2.5 -- extra radius for each level after the first
 GameConfig.LuckPerLevel = 0.05 -- +5% chance of a double-value cookie per level
+GameConfig.SpawnSpeedPerLevel = 0.06 -- -6% cookie respawn time per level
+GameConfig.MinRespawnTime = 0.8 -- never faster than this, however many levels
 
 GameConfig.Upgrades = {
 	{
@@ -171,6 +176,15 @@ GameConfig.Upgrades = {
 		MaxLevel = 12,
 		BaseCost = 120,
 		CostMultiplier = 1.55,
+	},
+	{
+		Id = "Spawn",
+		Name = "Fresh Batch",
+		Icon = "⏱️",
+		Blurb = "Cookies respawn faster in the pit",
+		MaxLevel = 12,
+		BaseCost = 90,
+		CostMultiplier = 1.5,
 	},
 	{
 		Id = "Luck",
@@ -423,6 +437,14 @@ function GameConfig.getMagnetRadius(state: any): number
 	return GameConfig.MagnetBaseRadius + GameConfig.MagnetPerLevel * (level - 1)
 end
 
+-- How long a collected cookie stays gone. Driven by the upgrade of whoever
+-- picked it up, since the cookies themselves are shared.
+function GameConfig.getRespawnTime(state: any): number
+	local level = GameConfig.getUpgradeLevel(state, "Spawn")
+	local scaled = GameConfig.CookieRespawnTime * (1 - GameConfig.SpawnSpeedPerLevel * level)
+	return math.max(GameConfig.MinRespawnTime, scaled)
+end
+
 function GameConfig.getLuckChance(state: any): number
 	return math.min(1, GameConfig.LuckPerLevel * GameConfig.getUpgradeLevel(state, "Luck"))
 end
@@ -446,6 +468,8 @@ function GameConfig.describeUpgrade(state: any, upgrade: any): string
 	elseif upgrade.Id == "Magnet" then
 		local radius = GameConfig.getMagnetRadius(state)
 		return radius > 0 and `Reach: {math.floor(radius)} studs` or "Not bought yet"
+	elseif upgrade.Id == "Spawn" then
+		return `Respawn: {string.format("%.1f", GameConfig.getRespawnTime(state))}s`
 	elseif upgrade.Id == "Luck" then
 		return `Double chance: {math.floor(GameConfig.getLuckChance(state) * 100)}%`
 	end
@@ -828,7 +852,8 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 
 	-- Hide it, then bring it back somewhere else on the same platform.
 	model.Parent = cookiePool
-	task.delay(GameConfig.CookieRespawnTime, function()
+	-- Whoever picked it up decides how fast it comes back; the cookies are shared.
+	task.delay(GameConfig.getRespawnTime(state), function()
 		if model.Parent == cookiePool then
 			placeCookie(model)
 		end
@@ -1457,14 +1482,18 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	folder.Parent = parent
 
 	local anchor = GameConfig.getLandmark(areaIndex, "BoardOffset")
-	local center, z = Vector3.new(anchor.X, 0, 0), anchor.Z
+	-- A part's Front face points down its own -Z. Unrotated, that faces away
+	-- from a player walking in, so the GUI rendered on the back of the board.
+	-- BoardYaw turns the whole assembly to face the play area.
+	local yaw = CFrame.Angles(0, math.rad(GameConfig.Areas[areaIndex].BoardYaw or 180), 0)
+	local base = CFrame.new(anchor) * yaw
 	local boardWidth, boardHeight = 52, 22
 
 	for _, side in { -1, 1 } do
 		makeAnchoredPart(
 			"BoardLeg",
 			Vector3.new(1.6, 12, 1.6),
-			CFrame.new(center + Vector3.new(side * (boardWidth / 2 - 2), 6, z)),
+			base * CFrame.new(side * (boardWidth / 2 - 2), 6, 0),
 			Color3.fromRGB(96, 74, 58),
 			folder
 		)
@@ -1473,7 +1502,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	makeAnchoredPart(
 		"BoardFrame",
 		Vector3.new(boardWidth + 2.4, boardHeight + 2.4, 1.6),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z)),
+		base * CFrame.new(0, 12 + boardHeight / 2, 0),
 		Color3.fromRGB(64, 52, 74),
 		folder
 	)
@@ -1481,7 +1510,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	local face = makeAnchoredPart(
 		"BoardFace",
 		Vector3.new(boardWidth, boardHeight, 1),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z - 0.6)),
+		base * CFrame.new(0, 12 + boardHeight / 2, -0.6),
 		Color3.fromRGB(30, 27, 40),
 		folder
 	)
@@ -1491,7 +1520,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	local header = makeAnchoredPart(
 		"BoardHeader",
 		Vector3.new(1, 1, 1),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight + 4, z)),
+		base * CFrame.new(0, 12 + boardHeight + 4, 0),
 		cfg.AccentColor,
 		folder
 	)
@@ -2523,6 +2552,13 @@ local function newPanel(parent: Instance, props: { [string]: any }): Frame
 	shadow.Position = frame.Position + UDim2.fromOffset(0, 5)
 	corner(shadow, 14)
 
+	-- A hidden panel used to leave its shadow behind as a black rectangle
+	-- floating in the middle of the screen, so bind the two together.
+	shadow.Visible = frame.Visible
+	frame:GetPropertyChangedSignal("Visible"):Connect(function()
+		shadow.Visible = frame.Visible
+	end)
+
 	return frame
 end
 
@@ -3427,14 +3463,14 @@ local function refreshBoard()
 	end
 end
 
--- Only one board is wired up: they all show the same thing, and a SurfaceGui
--- per area would multiply the click targets for no benefit.
-local boardBuilt = false
+-- One surface per board. Tag order is arbitrary, so wiring up only the first
+-- tagged board could easily land the GUI on a different zone's board.
+local wiredBoards: { [Instance]: boolean } = {}
 local function tryBuildBoard(face: Instance)
-	if boardBuilt or not face:IsA("BasePart") then
+	if wiredBoards[face] or not face:IsA("BasePart") then
 		return
 	end
-	boardBuilt = true
+	wiredBoards[face] = true
 	buildBoard(face)
 	refreshBoard()
 end

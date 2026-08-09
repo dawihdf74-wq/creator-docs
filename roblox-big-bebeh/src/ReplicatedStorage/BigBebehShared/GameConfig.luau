@@ -45,7 +45,10 @@ GameConfig.Areas = {
 		-- Cookies spawn only inside this pit, so the rest of the map is walkable
 		-- space for the board, the altar and the Bebeh.
 		CookiePit = { Center = Vector3.new(0, 0, 18), Size = Vector3.new(76, 76) },
-		BoardOffset = Vector3.new(0, 0, -34), -- board sits on the pit's back edge
+		-- Beside the pit, turned to face it. Standing it in front of the Bebeh
+		-- blocked the view of him.
+		BoardOffset = Vector3.new(-52, 0, 18),
+		BoardYaw = -90,
 		BebehOffset = Vector3.new(0, 0, -74),
 		AltarOffset = Vector3.new(-62, 0, 62),
 		ShopOffset = Vector3.new(62, 0, 62),
@@ -119,6 +122,8 @@ GameConfig.SpeedPerLevel = 2 -- +2 walk speed per level
 GameConfig.MagnetBaseRadius = 9 -- radius at level 1
 GameConfig.MagnetPerLevel = 2.5 -- extra radius for each level after the first
 GameConfig.LuckPerLevel = 0.05 -- +5% chance of a double-value cookie per level
+GameConfig.SpawnSpeedPerLevel = 0.06 -- -6% cookie respawn time per level
+GameConfig.MinRespawnTime = 0.8 -- never faster than this, however many levels
 
 GameConfig.Upgrades = {
 	{
@@ -147,6 +152,15 @@ GameConfig.Upgrades = {
 		MaxLevel = 12,
 		BaseCost = 120,
 		CostMultiplier = 1.55,
+	},
+	{
+		Id = "Spawn",
+		Name = "Fresh Batch",
+		Icon = "⏱️",
+		Blurb = "Cookies respawn faster in the pit",
+		MaxLevel = 12,
+		BaseCost = 90,
+		CostMultiplier = 1.5,
 	},
 	{
 		Id = "Luck",
@@ -399,6 +413,14 @@ function GameConfig.getMagnetRadius(state: any): number
 	return GameConfig.MagnetBaseRadius + GameConfig.MagnetPerLevel * (level - 1)
 end
 
+-- How long a collected cookie stays gone. Driven by the upgrade of whoever
+-- picked it up, since the cookies themselves are shared.
+function GameConfig.getRespawnTime(state: any): number
+	local level = GameConfig.getUpgradeLevel(state, "Spawn")
+	local scaled = GameConfig.CookieRespawnTime * (1 - GameConfig.SpawnSpeedPerLevel * level)
+	return math.max(GameConfig.MinRespawnTime, scaled)
+end
+
 function GameConfig.getLuckChance(state: any): number
 	return math.min(1, GameConfig.LuckPerLevel * GameConfig.getUpgradeLevel(state, "Luck"))
 end
@@ -422,6 +444,8 @@ function GameConfig.describeUpgrade(state: any, upgrade: any): string
 	elseif upgrade.Id == "Magnet" then
 		local radius = GameConfig.getMagnetRadius(state)
 		return radius > 0 and `Reach: {math.floor(radius)} studs` or "Not bought yet"
+	elseif upgrade.Id == "Spawn" then
+		return `Respawn: {string.format("%.1f", GameConfig.getRespawnTime(state))}s`
 	elseif upgrade.Id == "Luck" then
 		return `Double chance: {math.floor(GameConfig.getLuckChance(state) * 100)}%`
 	end

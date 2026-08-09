@@ -121,14 +121,18 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	folder.Parent = parent
 
 	local anchor = GameConfig.getLandmark(areaIndex, "BoardOffset")
-	local center, z = Vector3.new(anchor.X, 0, 0), anchor.Z
+	-- A part's Front face points down its own -Z. Unrotated, that faces away
+	-- from a player walking in, so the GUI rendered on the back of the board.
+	-- BoardYaw turns the whole assembly to face the play area.
+	local yaw = CFrame.Angles(0, math.rad(GameConfig.Areas[areaIndex].BoardYaw or 180), 0)
+	local base = CFrame.new(anchor) * yaw
 	local boardWidth, boardHeight = 52, 22
 
 	for _, side in { -1, 1 } do
 		makeAnchoredPart(
 			"BoardLeg",
 			Vector3.new(1.6, 12, 1.6),
-			CFrame.new(center + Vector3.new(side * (boardWidth / 2 - 2), 6, z)),
+			base * CFrame.new(side * (boardWidth / 2 - 2), 6, 0),
 			Color3.fromRGB(96, 74, 58),
 			folder
 		)
@@ -137,7 +141,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	makeAnchoredPart(
 		"BoardFrame",
 		Vector3.new(boardWidth + 2.4, boardHeight + 2.4, 1.6),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z)),
+		base * CFrame.new(0, 12 + boardHeight / 2, 0),
 		Color3.fromRGB(64, 52, 74),
 		folder
 	)
@@ -145,7 +149,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	local face = makeAnchoredPart(
 		"BoardFace",
 		Vector3.new(boardWidth, boardHeight, 1),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight / 2, z - 0.6)),
+		base * CFrame.new(0, 12 + boardHeight / 2, -0.6),
 		Color3.fromRGB(30, 27, 40),
 		folder
 	)
@@ -155,7 +159,7 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 	local header = makeAnchoredPart(
 		"BoardHeader",
 		Vector3.new(1, 1, 1),
-		CFrame.new(center + Vector3.new(0, 12 + boardHeight + 4, z)),
+		base * CFrame.new(0, 12 + boardHeight + 4, 0),
 		cfg.AccentColor,
 		folder
 	)

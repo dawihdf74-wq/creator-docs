@@ -38,6 +38,7 @@ Bought with Sprinkles, earned 1-for-1 for every cookie Big Bebeh eats.
 | 🧤 Bigger Hands | +20% carrying capacity per level | 20 | 105.7K |
 | 👟 Sugar Rush | +2 walk speed per level | 15 | 52.4K |
 | 🧲 Cookie Magnet | Vacuums cookies from 9 → 36 studs away | 12 | 41.7K |
+| ⏱️ Fresh Batch | Cookies respawn faster (5s → 1.4s) | 12 | 62.6K |
 | 🍀 Double Chip | +5% chance a cookie counts twice | 10 | 36.3K |
 
 One complete run through all five areas earns about **56K** sprinkles, and maxing
@@ -127,6 +128,24 @@ Script as children — that is what `require(script.PlayerState)` refers to.
 
 Then hit Play. The world (platforms, bridges, gates, Bebehs, cookies) is
 generated on server start, so you do not need to build anything yourself.
+
+## Seeing the map in Studio
+
+The world is generated when the **server starts**, so in edit mode Workspace is
+empty and there is no GUI — client scripts do not run until you press Play. That
+is expected, not a bug.
+
+To look at the map while editing, paste `tools/BuildMapInStudio.lua` into
+Studio's **Command Bar** (View → Command Bar) and press Enter. The whole map
+appears under `Workspace.BigBebehWorld`. Undo removes it.
+
+That preview is only for measuring and positioning: the map is rebuilt from
+`GameConfig` on every server start, so anything you place inside `BigBebehWorld`
+is discarded when you press Play. To change the map for real, edit `GameConfig`.
+
+Note you do **not** need the map visible to install the Bebeh mesh — importing it
+to `ServerStorage` as `BigBebeh` is all that is required, and the game positions
+it for you.
 
 ## The Blender models
 

@@ -114,6 +114,13 @@ local function newPanel(parent: Instance, props: { [string]: any }): Frame
 	shadow.Position = frame.Position + UDim2.fromOffset(0, 5)
 	corner(shadow, 14)
 
+	-- A hidden panel used to leave its shadow behind as a black rectangle
+	-- floating in the middle of the screen, so bind the two together.
+	shadow.Visible = frame.Visible
+	frame:GetPropertyChangedSignal("Visible"):Connect(function()
+		shadow.Visible = frame.Visible
+	end)
+
 	return frame
 end
 
@@ -1018,14 +1025,14 @@ local function refreshBoard()
 	end
 end
 
--- Only one board is wired up: they all show the same thing, and a SurfaceGui
--- per area would multiply the click targets for no benefit.
-local boardBuilt = false
+-- One surface per board. Tag order is arbitrary, so wiring up only the first
+-- tagged board could easily land the GUI on a different zone's board.
+local wiredBoards: { [Instance]: boolean } = {}
 local function tryBuildBoard(face: Instance)
-	if boardBuilt or not face:IsA("BasePart") then
+	if wiredBoards[face] or not face:IsA("BasePart") then
 		return
 	end
-	boardBuilt = true
+	wiredBoards[face] = true
 	buildBoard(face)
 	refreshBoard()
 end
