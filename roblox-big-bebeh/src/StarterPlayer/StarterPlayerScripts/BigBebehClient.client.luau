@@ -85,42 +85,20 @@ local function gradient(inst: Instance, top: number, bottom: number, rotation: n
 	return g
 end
 
--- The standard container: dark, outlined, softly lit, with a drop shadow made
--- from an offset sibling rather than an image asset.
+-- The standard container: dark, outlined and softly lit. Depth comes from the
+-- stroke rather than a second Frame, so there is no ZIndex or visibility
+-- bookkeeping to get wrong.
 local function newPanel(parent: Instance, props: { [string]: any }): Frame
-	local shadow = Instance.new("Frame")
-	shadow.Name = "Shadow"
-	shadow.BackgroundColor3 = Color3.new(0, 0, 0)
-	shadow.BackgroundTransparency = 0.55
-	shadow.BorderSizePixel = 0
-	shadow.ZIndex = 0
-	shadow.Parent = parent
-
 	local frame = Instance.new("Frame")
 	frame.BackgroundColor3 = PANEL_BG
 	frame.BorderSizePixel = 0
-	frame.ZIndex = 1
 	for k, v in props do
 		(frame :: any)[k] = v
 	end
 	frame.Parent = parent
 	corner(frame, 14)
 	stroke(frame, 3)
-	gradient(frame, 1.12, 0.88)
-
-	-- Keep the shadow glued under the panel.
-	shadow.AnchorPoint = frame.AnchorPoint
-	shadow.Size = frame.Size
-	shadow.Position = frame.Position + UDim2.fromOffset(0, 5)
-	corner(shadow, 14)
-
-	-- A hidden panel used to leave its shadow behind as a black rectangle
-	-- floating in the middle of the screen, so bind the two together.
-	shadow.Visible = frame.Visible
-	frame:GetPropertyChangedSignal("Visible"):Connect(function()
-		shadow.Visible = frame.Visible
-	end)
-
+	gradient(frame, 1.12, 0.86)
 	return frame
 end
 
@@ -170,6 +148,36 @@ gui.IgnoreGuiInset = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Parent = playerGui
 
+--[[
+	If this script errors partway through, everything below that line silently
+	never gets built and the player is left staring at half a HUD with no clue
+	why. This flag is set on the last line of the script; if it is still false a
+	few seconds in, something threw, so say so on screen and point at Output.
+]]
+local hudReady = false
+task.spawn(function()
+	task.wait(5)
+	if hudReady then
+		return
+	end
+	local banner = Instance.new("TextLabel")
+	banner.Name = "HudError"
+	banner.AnchorPoint = Vector2.new(0.5, 0)
+	banner.Position = UDim2.new(0.5, 0, 0, 90)
+	banner.Size = UDim2.new(0, 620, 0, 54)
+	banner.BackgroundColor3 = Color3.fromRGB(150, 30, 40)
+	banner.BorderSizePixel = 0
+	banner.Font = Enum.Font.GothamBold
+	banner.TextColor3 = Color3.fromRGB(255, 255, 255)
+	banner.TextScaled = true
+	banner.Text = "HUD failed to finish loading — open View ▸ Output for the error"
+	banner.Parent = gui
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 10)
+	c.Parent = banner
+	warn("[BigBebeh] The client script stopped early. The red error above this line is the cause.")
+end)
+
 local TOPBAR_CLEARANCE = 8
 local function topSafeY(extra: number): number
 	local inset = GuiService:GetGuiInset()
@@ -177,17 +185,6 @@ local function topSafeY(extra: number): number
 end
 
 -- HUD ----------------------------------------------------------------------
-
-local areaTitle = newLabel({
-	Name = "AreaTitle",
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, topSafeY(0)),
-	Size = UDim2.new(0, 460, 0, 46),
-	Font = Enum.Font.FredokaOne,
-	Text = GameConfig.Areas[1].Name,
-	TextStrokeTransparency = 0.35,
-})
-areaTitle.Parent = gui
 
 -- Sprinkle purse, top left.
 local purse = newPanel(gui, {
@@ -242,6 +239,18 @@ local panel = newPanel(gui, {
 	Position = UDim2.new(0.5, 0, 1, -18),
 	Size = UDim2.new(0, 452, 0, 138),
 })
+
+local areaLabel = newLabel({
+	Name = "AreaName",
+	Position = UDim2.new(0, 16, 0, -26),
+	Size = UDim2.new(1, -32, 0, 24),
+	Font = Enum.Font.FredokaOne,
+	Text = GameConfig.Areas[1].Name,
+	TextColor3 = Color3.fromRGB(236, 232, 250),
+	TextStrokeTransparency = 0.25,
+	TextXAlignment = Enum.TextXAlignment.Left,
+})
+areaLabel.Parent = panel
 
 local carryLabel = newLabel({
 	Name = "Carry",
@@ -863,7 +872,7 @@ end
 
 local function refreshPanel()
 	local here = currentAreaIndex()
-	areaTitle.Text = `{here}. {GameConfig.Areas[here].Name}`
+	areaLabel.Text = `{here}. {GameConfig.Areas[here].Name}`
 
 	sprinkleLabel.Text = `✨ {GameConfig.abbreviate(state.sprinkles)}`
 	rebirthBadge.Text = state.rebirths > 0
@@ -1206,6 +1215,13 @@ Remotes.CookiePop.OnClientEvent:Connect(floatText)
 
 -- Bebeh idle motion, plus the squish when he eats.
 local crystalBase: { [BasePart]: Vector3 } = {}
+local padBase = setmetatable({}, {
+	__index = function(self, pad)
+		local d = pad.Size.Y
+		rawset(self, pad, d)
+		return d
+	end,
+})
 local bebehBase: { [Model]: CFrame } = {}
 local bebehBounce: { [Model]: number } = {}
 
@@ -1293,6 +1309,17 @@ RunService.RenderStepped:Connect(function()
 		cookie:PivotTo(base * CFrame.new(0, bob, 0) * CFrame.Angles(0, now * 1.8, 0))
 	end
 
+	-- The feed pad brightens as your hands fill, so the place to go is obvious
+	-- without reading the HUD.
+	local fillRatio = state.capacity > 0 and math.clamp(state.carried / state.capacity, 0, 1) or 0
+	for _, pad in CollectionService:GetTagged("FeedPad") do
+		if pad:IsA("BasePart") then
+			pad.Transparency = 0.85 - 0.45 * fillRatio
+			local pulse = 1 + math.sin(now * 4) * 0.06 * fillRatio
+			pad.Size = Vector3.new(0.4, padBase[pad] * pulse, padBase[pad] * pulse)
+		end
+	end
+
 	for _, crystal in CollectionService:GetTagged("RuneCrystal") do
 		if crystal:IsA("BasePart") then
 			local base = crystalBase[crystal]
@@ -1346,3 +1373,6 @@ task.spawn(function()
 		refreshPanel()
 	end
 end)
+
+-- Reached the end, so the watchdog above stands down.
+hudReady = true
