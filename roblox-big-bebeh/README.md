@@ -308,9 +308,16 @@ overwriting them to save a few edits is a bad trade. It reports which hook-ins
 are missing instead, and step 2 applies exactly those.
 
 If a step ever reports `BLOCKED` or `MISSED`, stop and read it: something in
-your copy has drifted from what the patch expected. `tools/3_RepairWorldBuilder.lua`
-puts a known-good `WorldBuilder` back if that one gets mangled — it is generated
-map code with nothing of yours in it, so replacing it wholesale is safe.
+your copy has drifted from what the patch expected. `tools/3_FixLeaderboardBuilder.lua`
+repairs the one case that has bitten in practice — a `buildLeaderboards` call
+with no definition — by adding only what is missing, never replacing your file.
+
+**Anchor on code, not on comments.** A patch that anchored on the text of a
+comment above `buildRuneAltar` missed on a copy where that comment had been
+reworded, while the patch adding the *call* still matched — leaving a call with
+no definition and a server that would not start. Anchors are now structural
+(`local function buildArea`), and a call-site patch refuses to apply unless its
+definition is already in place above it.
 
 Step 2 is anchored find/replace: each change matches one exact region, skips
 anything already applied, and reports a miss rather than guessing — including

@@ -486,13 +486,34 @@ LeaderboardOffset = Vector3.new(size.X / 2 - 10]],
 table.insert(PATCHES, {
 	target = "WorldBuilder",
 	label = [[
+tidy the buildArea comment]],
+	marker = [[
+local function buildArea(areaIndex: number, parent: Instance)
+	-- One platform]],
+	finds = {
+		[[
+-- One platform, its fence, its name sign and its Bebeh.
+local function buildArea(areaIndex: number, parent: Instance)
+]],
+		[[
+-- One platform, its fence, its name, its sign and its Bebeh.
+local function buildArea(areaIndex: number, parent: Instance)
+]],
+	},
+	replace = [[
+local function buildArea(areaIndex: number, parent: Instance)
+	-- One platform, its fence, its name sign and its Bebeh.
+]],
+})
+table.insert(PATCHES, {
+	target = "WorldBuilder",
+	label = [[
 the leaderboard builder]],
 	marker = [[
 local function buildLeaderboards]],
 	finds = {
 		[[
---[[
-	The rune altar.]],
+local function buildArea(areaIndex: number, parent: Instance)]],
 	},
 	replace = [=[
 --[[
@@ -565,8 +586,7 @@ local function buildLeaderboards(areaIndex: number, cfg: any, parent: Instance)
 	return folder
 end
 
---[[
-	The rune altar.]=],
+local function buildArea(areaIndex: number, parent: Instance)]=],
 })
 table.insert(PATCHES, {
 	target = "WorldBuilder",

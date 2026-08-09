@@ -2420,76 +2420,6 @@ local function buildUpgradeBoard(areaIndex: number, cfg: any, parent: Instance)
 end
 
 --[[
-	A row of global leaderboards.
-
-	Unlike the upgrade board, these are drawn by the SERVER. Every player sees
-	the same ten names, so rendering them once and letting them replicate beats
-	rebuilding the same list in every client.
-
-	Each face is tagged so the game script can find it again to fill in rows;
-	the builder only puts up the empty board.
-]]
-local function buildLeaderboards(areaIndex: number, cfg: any, parent: Instance)
-	local folder = Instance.new("Folder")
-	folder.Name = "Leaderboards"
-	folder.Parent = parent
-
-	local anchor = GameConfig.getLandmark(areaIndex, "LeaderboardOffset")
-	local yaw = CFrame.Angles(0, math.rad(GameConfig.Areas[areaIndex].LeaderboardYaw or 0), 0)
-	local base = CFrame.new(anchor) * yaw
-
-	local boardWidth, boardHeight, spacing = 20, 26, 23
-	local count = #GameConfig.Leaderboards
-	-- Lay the row out around its centre, so the anchor means the middle of the
-	-- row rather than the first board.
-	local startX = -(count - 1) * spacing / 2
-
-	for index, board in GameConfig.Leaderboards do
-		local at = base * CFrame.new(startX + (index - 1) * spacing, 0, 0)
-
-		makeAnchoredPart(
-			"LeaderboardLeg",
-			Vector3.new(1.4, 10, 1.4),
-			at * CFrame.new(0, 5, 0),
-			Color3.fromRGB(96, 74, 58),
-			folder
-		)
-		makeAnchoredPart(
-			"LeaderboardFrame",
-			Vector3.new(boardWidth + 2, boardHeight + 2, 1.4),
-			at * CFrame.new(0, 10 + boardHeight / 2, 0),
-			Color3.fromRGB(64, 52, 74),
-			folder
-		)
-
-		local face = makeAnchoredPart(
-			"LeaderboardFace",
-			Vector3.new(boardWidth, boardHeight, 1),
-			at * CFrame.new(0, 10 + boardHeight / 2, -0.6),
-			Color3.fromRGB(26, 24, 36),
-			folder
-		)
-		face.Material = Enum.Material.SmoothPlastic
-		-- Which board this is, so the filler does not have to rely on order.
-		face:SetAttribute("BoardId", board.Id)
-		CollectionService:AddTag(face, "Leaderboard")
-	end
-
-	local header = makeAnchoredPart(
-		"LeaderboardHeader",
-		Vector3.new(1, 1, 1),
-		base * CFrame.new(0, 10 + boardHeight + 5, 0),
-		cfg.AccentColor,
-		folder
-	)
-	header.Transparency = 1
-	header.CanCollide = false
-	makeSign("🏆 HALL OF CRUMBS", UDim2.fromScale(26, 4), header, 0)
-
-	return folder
-end
-
---[[
 	The rune altar. Stand on it and runes open by themselves; the server watches
 	the radius, so there is nothing to press.
 ]]
@@ -2658,8 +2588,78 @@ local function buildScenery(areaIndex: number, center: Vector3, size: Vector3, c
 	return folder
 end
 
--- One platform, its fence, its name sign and its Bebeh.
+--[[
+	A row of global leaderboards.
+
+	Unlike the upgrade board, these are drawn by the SERVER. Every player sees
+	the same ten names, so rendering them once and letting them replicate beats
+	rebuilding the same list in every client.
+
+	Each face is tagged so the game script can find it again to fill in rows;
+	the builder only puts up the empty board.
+]]
+local function buildLeaderboards(areaIndex: number, cfg: any, parent: Instance)
+	local folder = Instance.new("Folder")
+	folder.Name = "Leaderboards"
+	folder.Parent = parent
+
+	local anchor = GameConfig.getLandmark(areaIndex, "LeaderboardOffset")
+	local yaw = CFrame.Angles(0, math.rad(GameConfig.Areas[areaIndex].LeaderboardYaw or 0), 0)
+	local base = CFrame.new(anchor) * yaw
+
+	local boardWidth, boardHeight, spacing = 20, 26, 23
+	local count = #GameConfig.Leaderboards
+	-- Lay the row out around its centre, so the anchor means the middle of the
+	-- row rather than the first board.
+	local startX = -(count - 1) * spacing / 2
+
+	for index, board in GameConfig.Leaderboards do
+		local at = base * CFrame.new(startX + (index - 1) * spacing, 0, 0)
+
+		makeAnchoredPart(
+			"LeaderboardLeg",
+			Vector3.new(1.4, 10, 1.4),
+			at * CFrame.new(0, 5, 0),
+			Color3.fromRGB(96, 74, 58),
+			folder
+		)
+		makeAnchoredPart(
+			"LeaderboardFrame",
+			Vector3.new(boardWidth + 2, boardHeight + 2, 1.4),
+			at * CFrame.new(0, 10 + boardHeight / 2, 0),
+			Color3.fromRGB(64, 52, 74),
+			folder
+		)
+
+		local face = makeAnchoredPart(
+			"LeaderboardFace",
+			Vector3.new(boardWidth, boardHeight, 1),
+			at * CFrame.new(0, 10 + boardHeight / 2, -0.6),
+			Color3.fromRGB(26, 24, 36),
+			folder
+		)
+		face.Material = Enum.Material.SmoothPlastic
+		-- Which board this is, so the filler does not have to rely on order.
+		face:SetAttribute("BoardId", board.Id)
+		CollectionService:AddTag(face, "Leaderboard")
+	end
+
+	local header = makeAnchoredPart(
+		"LeaderboardHeader",
+		Vector3.new(1, 1, 1),
+		base * CFrame.new(0, 10 + boardHeight + 5, 0),
+		cfg.AccentColor,
+		folder
+	)
+	header.Transparency = 1
+	header.CanCollide = false
+	makeSign("🏆 HALL OF CRUMBS", UDim2.fromScale(26, 4), header, 0)
+
+	return folder
+end
+
 local function buildArea(areaIndex: number, parent: Instance)
+	-- One platform, its fence, its name sign and its Bebeh.
 	local cfg = GameConfig.Areas[areaIndex]
 	local center = GameConfig.getAreaCenter(areaIndex)
 	local size = GameConfig.getPlatformSize(areaIndex)
