@@ -30,9 +30,11 @@ table.insert(PATCHES, {
 require SessionLock]],
 	marker = [[
 script.Parent.SessionLock]],
-	find = [[
+	finds = {
+		[[
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 ]],
+	},
 	replace = [[
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local SessionLock = require(script.Parent.SessionLock)
@@ -44,11 +46,13 @@ table.insert(PATCHES, {
 start the lock heartbeat]],
 	marker = [[
 SessionLock.startHeartbeat]],
-	find = [[
+	finds = {
+		[[
 	if ok then
 		store = result
 	else
 ]],
+	},
 	replace = [[
 	if ok then
 		store = result
@@ -59,10 +63,27 @@ SessionLock.startHeartbeat]],
 table.insert(PATCHES, {
 	target = "PlayerState",
 	label = [[
-load claims the save]],
+require RunService]],
 	marker = [[
-SessionLock.claim]],
-	find = [[
+local RunService = game:GetService("RunService")]],
+	finds = {
+		[[
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+]],
+	},
+	replace = [[
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+]],
+})
+table.insert(PATCHES, {
+	target = "PlayerState",
+	label = [[
+load claims the save, and degrades in Studio]],
+	marker = [[
+Running WITHOUT saves]],
+	finds = {
+		[[
 function PlayerState.load(player: Player)
 	local raw = nil
 	if store then
@@ -80,7 +101,7 @@ function PlayerState.load(player: Player)
 	states[player] = state
 	return state
 end]],
-	replace = [=[
+		[=[
 --[[
 	Loads a player's progress, claiming their save first.
 
@@ -103,6 +124,55 @@ function PlayerState.load(player: Player): (any, string?)
 	states[player] = state
 	return state, nil
 end]=],
+	},
+	replace = [=[
+--[[
+	Loads a player's progress, claiming their save first.
+
+	Returns `state, nil` on success, or `nil, reason` when the save could not be
+	claimed. A refusal is not an inconvenience to route around -- loading anyway
+	would put two servers on the same data, which is precisely the duplication
+	SessionLock exists to stop. The caller must kick the player with the reason.
+]]
+function PlayerState.load(player: Player): (any, string?)
+	local raw = nil
+	if store then
+		local claim = SessionLock.claim(store, key(player))
+
+		--[[
+			A claim can fail two very different ways, and they deserve opposite
+			answers.
+
+			`taken` means another server holds the save. Refuse, always -- that is
+			the duplication this exists to stop.
+
+			Otherwise the DataStore simply could not be reached. In a live server
+			that still has to refuse: letting somebody play from a default state
+			and then saving it would overwrite the real progress they already had,
+			which is worse than making them wait. But in Studio it is almost always
+			API access being switched off, where nothing persists and there is no
+			second server, so there is nothing to duplicate and nothing to lose.
+			Locking a developer out of their own game over that is pure friction,
+			so Studio drops to the no-saves mode the game has always had.
+		]]
+		if not claim.ok then
+			if claim.taken or not RunService:IsStudio() then
+				return nil, claim.reason or "Could not open your save."
+			end
+
+			warn(`[BigBebeh] {claim.reason}`)
+			warn("[BigBebeh] Running WITHOUT saves. To test saving, turn on:")
+			warn("[BigBebeh]   Game Settings -> Security -> Enable Studio Access to API Services")
+			store = nil
+		else
+			raw = claim.data
+		end
+	end
+
+	local state = sanitize(raw)
+	states[player] = state
+	return state, nil
+end]=],
 })
 table.insert(PATCHES, {
 	target = "PlayerState",
@@ -110,7 +180,8 @@ table.insert(PATCHES, {
 save and release go through the lock]],
 	marker = [[
 SessionLock.save]],
-	find = [[
+	finds = {
+		[[
 	local ok, err = pcall(function()
 		store:SetAsync(key(player), state)
 	end)
@@ -123,6 +194,7 @@ function PlayerState.release(player: Player)
 	PlayerState.save(player)
 	states[player] = nil
 end]],
+	},
 	replace = [[
 	-- Writes through SessionLock, which refuses if this server no longer owns the
 	-- save. Overwriting a claim we lost would roll the other server back.
@@ -145,9 +217,11 @@ table.insert(PATCHES, {
 require AntiCheat]],
 	marker = [[
 require(script.AntiCheat)]],
-	find = [[
+	finds = {
+		[[
 local BebehBuilder = require(script.BebehBuilder)
 ]],
+	},
 	replace = [[
 local AntiCheat = require(script.AntiCheat)
 local BebehBuilder = require(script.BebehBuilder)
@@ -159,9 +233,11 @@ table.insert(PATCHES, {
 teleportToArea pardons the move]],
 	marker = [[
 AntiCheat.pardon]],
-	find = [[
+	finds = {
+		[[
 	character:PivotTo(CFrame.new(center + Vector3.new(0, 6, 70)))
 ]],
+	},
 	replace = [[
 	-- Tell the watchdog before moving them, or the game's own teleport reads as a
 	-- teleport exploit the instant it lands.
@@ -175,11 +251,13 @@ table.insert(PATCHES, {
 throttle BuyUpgrade]],
 	marker = [[
 AntiCheat.allow(player, "BuyUpgrade")]],
-	find = [[
+	finds = {
+		[[
 Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
 	if type(upgradeId) ~= "string" then
 		return
 	end]],
+	},
 	replace = [[
 Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
 	if not AntiCheat.allow(player, "BuyUpgrade") then
@@ -197,9 +275,11 @@ table.insert(PATCHES, {
 throttle Rebirth]],
 	marker = [[
 AntiCheat.allow(player, "Rebirth")]],
-	find = [[
+	finds = {
+		[[
 Remotes.Rebirth.OnServerEvent:Connect(function(player)
 	local state = PlayerState.get(player)]],
+	},
 	replace = [[
 Remotes.Rebirth.OnServerEvent:Connect(function(player)
 	if not AntiCheat.allow(player, "Rebirth") then
@@ -213,10 +293,12 @@ table.insert(PATCHES, {
 throttle SyncState]],
 	marker = [[
 AntiCheat.allow(player, "SyncState")]],
-	find = [[
+	finds = {
+		[[
 Remotes.SyncState.OnServerEvent:Connect(function(player)
 	sync(player)
 end)]],
+	},
 	replace = [[
 Remotes.SyncState.OnServerEvent:Connect(function(player)
 	-- Cheap to serve but not free, and it is the easiest remote to sit in a loop.
@@ -232,10 +314,12 @@ table.insert(PATCHES, {
 join refuses a locked save]],
 	marker = [[
 player:Kick(refused)]],
-	find = [[
+	finds = {
+		[[
 local function onPlayerAdded(player: Player)
 	local state = PlayerState.load(player)
 ]],
+	},
 	replace = [[
 local function onPlayerAdded(player: Player)
 	AntiCheat.watch(player)
@@ -260,11 +344,13 @@ table.insert(PATCHES, {
 leaving clears the tracker, and AntiCheat starts]],
 	marker = [[
 AntiCheat.forget]],
-	find = [[
+	finds = {
+		[[
 Players.PlayerRemoving:Connect(function(player)
 	lastToast[player] = nil
 	PlayerState.release(player)
 end)]],
+	},
 	replace = [[
 Players.PlayerRemoving:Connect(function(player)
 	lastToast[player] = nil
@@ -304,17 +390,28 @@ for _, patch in PATCHES do
 		continue
 	end
 
-	local from, to = string.find(source, patch.find, 1, true)
-	if not from then
-		say(`MISSED  {patch.label} — could not find the anchor in {name}. Apply this one by hand.`)
-		missed += 1
-		continue
+	-- Several anchors may be listed, one per shape the code has had. Take the
+	-- first that matches exactly once; a second match means the anchor is
+	-- ambiguous, and picking one at random is worse than doing nothing.
+	local from, to, ambiguous = nil, nil, false
+	for _, anchor in patch.finds do
+		local a, b = string.find(source, anchor, 1, true)
+		if a then
+			if string.find(source, anchor, b + 1, true) then
+				ambiguous = true
+			else
+				from, to = a, b
+				break
+			end
+		end
 	end
 
-	-- A second match means the anchor is ambiguous, and picking one at random is
-	-- worse than doing nothing.
-	if string.find(source, patch.find, to + 1, true) then
-		say(`MISSED  {patch.label} — the anchor appears more than once in {name}, so it is ambiguous.`)
+	if not from then
+		if ambiguous then
+			say(`MISSED  {patch.label} — the anchor appears more than once in {name}, so it is ambiguous.`)
+		else
+			say(`MISSED  {patch.label} — could not find the anchor in {name}. Apply this one by hand.`)
+		end
 		missed += 1
 		continue
 	end

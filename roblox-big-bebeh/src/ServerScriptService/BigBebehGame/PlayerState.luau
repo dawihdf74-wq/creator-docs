@@ -18,6 +18,7 @@
 
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local SessionLock = require(script.Parent.SessionLock)
@@ -141,10 +142,35 @@ function PlayerState.load(player: Player): (any, string?)
 	local raw = nil
 	if store then
 		local claim = SessionLock.claim(store, key(player))
+
+		--[[
+			A claim can fail two very different ways, and they deserve opposite
+			answers.
+
+			`taken` means another server holds the save. Refuse, always -- that is
+			the duplication this exists to stop.
+
+			Otherwise the DataStore simply could not be reached. In a live server
+			that still has to refuse: letting somebody play from a default state
+			and then saving it would overwrite the real progress they already had,
+			which is worse than making them wait. But in Studio it is almost always
+			API access being switched off, where nothing persists and there is no
+			second server, so there is nothing to duplicate and nothing to lose.
+			Locking a developer out of their own game over that is pure friction,
+			so Studio drops to the no-saves mode the game has always had.
+		]]
 		if not claim.ok then
-			return nil, claim.reason or "Could not open your save."
+			if claim.taken or not RunService:IsStudio() then
+				return nil, claim.reason or "Could not open your save."
+			end
+
+			warn(`[BigBebeh] {claim.reason}`)
+			warn("[BigBebeh] Running WITHOUT saves. To test saving, turn on:")
+			warn("[BigBebeh]   Game Settings -> Security -> Enable Studio Access to API Services")
+			store = nil
+		else
+			raw = claim.data
 		end
-		raw = claim.data
 	end
 
 	local state = sanitize(raw)

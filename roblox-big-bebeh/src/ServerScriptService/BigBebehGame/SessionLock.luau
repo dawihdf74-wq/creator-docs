@@ -42,6 +42,10 @@ export type ClaimResult = {
 	ok: boolean,
 	reason: string?, -- set when ok is false, safe to show the player
 	data: any, -- the saved value, only when ok is true
+	-- True only when another server holds the claim. A failure with `taken =
+	-- false` means the DataStore could not be reached at all, which is a very
+	-- different problem and the caller may reasonably treat it differently.
+	taken: boolean,
 }
 
 --[[
@@ -78,10 +82,10 @@ function SessionLock.claim(store: DataStore, key: string): ClaimResult
 
 	if not ok then
 		-- A DataStore outage must not become a dupe window, so this fails closed.
-		return { ok = false, reason = `Could not reach the save servers: {err}`, data = nil }
+		return { ok = false, reason = `Could not reach the save servers: {err}`, data = nil, taken = false }
 	end
 	if rejected then
-		return { ok = false, reason = rejected, data = nil }
+		return { ok = false, reason = rejected, data = nil, taken = true }
 	end
 
 	held[key] = true
@@ -90,7 +94,7 @@ function SessionLock.claim(store: DataStore, key: string): ClaimResult
 		return store:GetAsync(key)
 	end)
 	local data = if read and type(record) == "table" then record.data else nil
-	return { ok = true, reason = nil, data = data }
+	return { ok = true, reason = nil, data = data, taken = false }
 end
 
 -- Writes the player's progress alongside the claim, refreshing it in the same

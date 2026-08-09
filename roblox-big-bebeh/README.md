@@ -167,9 +167,23 @@ and drops it on the way out. A server that finds a live claim refuses to load an
 kicks with an explanation rather than starting from stale data.
 
 A claim expires after 90s without a refresh, so a server crash costs the player a
-short wait rather than locking them out of their own save forever. A DataStore
-outage fails *closed* — no claim, no play — because the alternative is a dupe
-window that opens exactly when Roblox is having a bad day.
+short wait rather than locking them out of their own save forever.
+
+A failed claim splits two ways, and they get opposite answers:
+
+- **Another server holds it** — refuse, always. That is the duplication this
+  exists to stop.
+- **The DataStore could not be reached at all** — a live server still refuses,
+  because letting somebody play from a default state and then saving it would
+  overwrite the progress they already had, which is worse than making them wait.
+  **Studio** instead drops to the no-saves mode the game has always had: there is
+  no second server and nothing persists, so nothing can be duplicated and nothing
+  can be lost, and locking a developer out of their own game over a settings
+  checkbox is pure friction.
+
+That Studio case is almost always **Game Settings → Security → Enable Studio
+Access to API Services** being switched off. Turn it on to test saving; leave it
+off and the game still runs, just without saves, and says so in the Output.
 
 ### What gets detected
 
