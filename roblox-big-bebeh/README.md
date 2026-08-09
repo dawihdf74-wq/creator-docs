@@ -134,6 +134,109 @@ a `passes` field on purpose — so editing a save cannot hand anyone a pass they
 did not pay for. If the ownership check fails (a Roblox outage, say), it fails
 closed to "not owned" rather than granting the perk.
 
+## Anti-cheat
+
+Two modules under `ServerScriptService/BigBebehGame`:
+
+- **`SessionLock`** — stops duplication.
+- **`AntiCheat`** — throttling, movement checks, strikes, Discord reports.
+
+### What actually protects the game
+
+An exploiter runs arbitrary Lua on their own machine. Anything a LocalScript
+checks, they can delete — so there is no such thing as client-side anti-cheat,
+only server checks and speed bumps. Everything here runs on the server.
+
+The real protection was already in place before either module existed: the server
+owns the economy. The client asks for an upgrade *by name* and the server decides
+the price; cookies are added by the server after a distance check; no number the
+client sends is ever used. Nothing in `collect`, `feed` or `BuyUpgrade` yields
+part-way through, so there is no race to wedge a second request into.
+
+### Duplication
+
+The one genuine dupe vector was **cross-server rollback**: be in two servers at
+once, spend in one and bank in the other, and whichever saves last wins — so the
+currency you spent is still there. No amount of validation inside the game loop
+prevents that, because both servers are behaving correctly on stale data.
+
+`SessionLock` fixes it by making save ownership a single value only one server
+can hold. Each session claims the key with `UpdateAsync` (atomic, so two servers
+claiming at once cannot both win), refreshes the claim every 30s while playing,
+and drops it on the way out. A server that finds a live claim refuses to load and
+kicks with an explanation rather than starting from stale data.
+
+A claim expires after 90s without a refresh, so a server crash costs the player a
+short wait rather than locking them out of their own save forever. A DataStore
+outage fails *closed* — no claim, no play — because the alternative is a dupe
+window that opens exactly when Roblox is having a bad day.
+
+### What gets detected
+
+| Rule | Strikes | What trips it |
+|---|---|---|
+| `Speed` | 1 | 3 consecutive samples faster than walk speed × 1.6 + 8 studs |
+| `Teleport` | 2 | a single 0.5s sample longer than 150 studs |
+| `Flight` | 2 | 6s airborne without losing height |
+| `RemoteSpam` | 1 | a remote called far past its token allowance |
+| `BadPayload` | 3 | a remote sent an argument the real client never sends |
+
+Six strikes kicks. Strikes decay after 5 minutes each, so somebody who trips one
+check once an hour never escalates while somebody flying does. Banning is off by
+default (`BanAt = 0`) — watch the channel for a while before turning it on.
+
+Roblox gives the client physics ownership of its own character, so a laggy player
+genuinely does look like a short teleport. That is why the thresholds are loose,
+why speed needs three consecutive bad samples, and why one detection alone does
+nothing. Tune in `AntiCheat.Settings` once you have seen real traffic.
+
+The game teleports players itself (rebirth, the void catcher, respawn). Each of
+those calls `AntiCheat.pardon`, without which the game's own teleports would
+report as exploits. **If you add another teleport, pardon it too.**
+
+### Discord webhook
+
+**Discord will not accept a webhook posted straight from a Roblox server.** It
+blocks Roblox's address range and returns 403 with nothing useful in it. This
+catches everybody once. You need a small proxy in between.
+
+A Cloudflare Worker does it free, at `workers.cloudflare.com` → Create Worker:
+
+```js
+export default {
+  async fetch(request, env) {
+    if (request.method !== "POST") return new Response("nope", { status: 405 });
+    return fetch(env.DISCORD_WEBHOOK, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: await request.text(),
+    });
+  },
+};
+```
+
+Put your real Discord webhook URL in a Worker **secret** named
+`DISCORD_WEBHOOK` (Settings → Variables → Add secret, not a plain variable) so
+the URL never appears in your game code — anyone who can read your scripts could
+otherwise spam your channel. Then set the Worker's own URL in `AntiCheat.luau`:
+
+```lua
+AntiCheat.WebhookUrl = "https://your-worker.workers.dev"
+```
+
+Leave it empty and reports go to the Output window instead, which is the right
+setting while you are testing.
+
+You also need **Game Settings → Security → Allow HTTP Requests** turned on.
+
+Reports are queued and flushed every 3 seconds, up to Discord's limit of 10
+embeds per message, and repeats of the same rule by the same player inside 30
+seconds collapse into a single `(x25)` count. That is not tidiness: a flying
+player trips the check twice a second, and a webhook firing that often gets
+rate-limited by Discord and drowns the channel. Each report carries the display
+name, @username, user id, a profile link, the strike count, and the numbers that
+triggered it.
+
 ## Installing
 
 ### Option A — open the place file (easiest)

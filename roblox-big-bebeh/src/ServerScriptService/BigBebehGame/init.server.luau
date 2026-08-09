@@ -21,6 +21,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local Remotes = require(ReplicatedStorage.BigBebehShared.Remotes)
+local AntiCheat = require(script.AntiCheat)
 local BebehBuilder = require(script.BebehBuilder)
 local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
@@ -238,6 +239,9 @@ local function teleportToArea(player: Player, areaIndex: number)
 		return
 	end
 	local center = GameConfig.getAreaCenter(areaIndex)
+	-- Tell the watchdog before moving them, or the game's own teleport reads as a
+	-- teleport exploit the instant it lands.
+	AntiCheat.pardon(player, 3)
 	character:PivotTo(CFrame.new(center + Vector3.new(0, 6, 70)))
 end
 
@@ -508,7 +512,12 @@ end)
 -- Shop and rebirth ---------------------------------------------------------
 
 Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
+	if not AntiCheat.allow(player, "BuyUpgrade") then
+		return
+	end
 	if type(upgradeId) ~= "string" then
+		-- The real client only ever sends a string. Anything else was hand-built.
+		AntiCheat.flag(player, "BadPayload", `BuyUpgrade sent a {typeof(upgradeId)}`)
 		return
 	end
 	local state = PlayerState.get(player)
@@ -537,6 +546,9 @@ Remotes.BuyUpgrade.OnServerEvent:Connect(function(player, upgradeId)
 end)
 
 Remotes.Rebirth.OnServerEvent:Connect(function(player)
+	if not AntiCheat.allow(player, "Rebirth") then
+		return
+	end
 	local state = PlayerState.get(player)
 	if not state then
 		return
@@ -611,7 +623,20 @@ end)
 -- Players ------------------------------------------------------------------
 
 local function onPlayerAdded(player: Player)
-	local state = PlayerState.load(player)
+	AntiCheat.watch(player)
+
+	if AntiCheat.isBanned(player.UserId) then
+		player:Kick("You are banned from this experience.")
+		return
+	end
+
+	local state, refused = PlayerState.load(player)
+	if not state then
+		-- Their save is open in another server. Letting them play from stale data
+		-- is how currency gets duplicated, so they wait instead.
+		player:Kick(refused)
+		return
+	end
 
 	local stats = Instance.new("Folder")
 	stats.Name = "leaderstats"
@@ -649,11 +674,22 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
 	lastToast[player] = nil
+	AntiCheat.forget(player)
 	PlayerState.release(player)
+end)
+
+-- Movement sampling and Discord reporting. AntiCheat cannot require PlayerState
+-- itself without a require cycle, so it is handed a way to read state instead.
+AntiCheat.start(function(player)
+	return PlayerState.get(player)
 end)
 
 -- The client pings this once its UI is built, so it never misses the first sync.
 Remotes.SyncState.OnServerEvent:Connect(function(player)
+	-- Cheap to serve but not free, and it is the easiest remote to sit in a loop.
+	if not AntiCheat.allow(player, "SyncState") then
+		return
+	end
 	sync(player)
 end)
 

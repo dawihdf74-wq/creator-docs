@@ -20,6 +20,7 @@ local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
+local SessionLock = require(script.Parent.SessionLock)
 
 local PlayerState = {}
 
@@ -32,6 +33,7 @@ if GameConfig.SaveEnabled then
 	end)
 	if ok then
 		store = result
+		SessionLock.startHeartbeat(result)
 	else
 		warn(`[BigBebeh] DataStore unavailable, running without saves: {result}`)
 	end
@@ -127,22 +129,27 @@ local function key(player: Player): string
 	return `player_{player.UserId}`
 end
 
-function PlayerState.load(player: Player)
+--[[
+	Loads a player's progress, claiming their save first.
+
+	Returns `state, nil` on success, or `nil, reason` when the save could not be
+	claimed. A refusal is not an inconvenience to route around -- loading anyway
+	would put two servers on the same data, which is precisely the duplication
+	SessionLock exists to stop. The caller must kick the player with the reason.
+]]
+function PlayerState.load(player: Player): (any, string?)
 	local raw = nil
 	if store then
-		local ok, result = pcall(function()
-			return store:GetAsync(key(player))
-		end)
-		if ok then
-			raw = result
-		else
-			warn(`[BigBebeh] Load failed for {player.Name}: {result}`)
+		local claim = SessionLock.claim(store, key(player))
+		if not claim.ok then
+			return nil, claim.reason or "Could not open your save."
 		end
+		raw = claim.data
 	end
 
 	local state = sanitize(raw)
 	states[player] = state
-	return state
+	return state, nil
 end
 
 function PlayerState.get(player: Player)
@@ -154,16 +161,18 @@ function PlayerState.save(player: Player)
 	if not state or not store then
 		return
 	end
-	local ok, err = pcall(function()
-		store:SetAsync(key(player), state)
-	end)
-	if not ok then
-		warn(`[BigBebeh] Save failed for {player.Name}: {err}`)
-	end
+	-- Writes through SessionLock, which refuses if this server no longer owns the
+	-- save. Overwriting a claim we lost would roll the other server back.
+	SessionLock.save(store, key(player), state)
 end
 
 function PlayerState.release(player: Player)
-	PlayerState.save(player)
+	local state = states[player]
+	if state and store then
+		-- Save and drop the claim together, so the player can rejoin elsewhere
+		-- straight away instead of waiting for the claim to time out.
+		SessionLock.release(store, key(player), state)
+	end
 	states[player] = nil
 end
 
