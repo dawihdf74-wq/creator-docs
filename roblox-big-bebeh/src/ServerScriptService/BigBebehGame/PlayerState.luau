@@ -12,6 +12,8 @@
 		rebirths  = 0,
 		runes     = { BasicCookie = 412, RareCookie = 8 },
 		runesOpened = 420,
+		totalCookies = 9120,     -- lifetime, never reset by rebirth
+		playtime  = 4830,        -- seconds played, all sessions
 		passes    = { DoubleCookies = true }, -- runtime only, never saved
 	}
 ]]
@@ -59,6 +61,9 @@ local function defaultState()
 		rebirths = 0,
 		runes = runes,
 		runesOpened = 0,
+		-- Leaderboard stats. Lifetime totals: rebirth resets areas, not records.
+		totalCookies = 0,
+		playtime = 0,
 		-- Game pass ownership is filled in from Roblox after the state loads.
 		passes = {},
 	}
@@ -103,6 +108,12 @@ local function sanitize(raw: any)
 	end
 	if type(raw.runesOpened) == "number" and raw.runesOpened >= 0 then
 		state.runesOpened = math.floor(raw.runesOpened)
+	end
+	if type(raw.totalCookies) == "number" and raw.totalCookies >= 0 then
+		state.totalCookies = math.floor(raw.totalCookies)
+	end
+	if type(raw.playtime) == "number" and raw.playtime >= 0 then
+		state.playtime = math.floor(raw.playtime)
 	end
 
 	-- `passes` is deliberately NOT read from the save. Ownership is answered by

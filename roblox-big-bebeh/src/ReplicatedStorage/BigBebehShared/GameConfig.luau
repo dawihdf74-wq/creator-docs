@@ -52,6 +52,9 @@ GameConfig.Areas = {
 		BebehOffset = Vector3.new(0, 0, -74),
 		AltarOffset = Vector3.new(-62, 0, 62),
 		ShopOffset = Vector3.new(62, 0, 62),
+		-- Mirrors the upgrade board on the far side of the pit, turned to face it.
+		LeaderboardOffset = Vector3.new(58, 0, 4),
+		LeaderboardYaw = 90,
 		FloorColor = Color3.fromRGB(126, 196, 122),
 		AccentColor = Color3.fromRGB(255, 232, 120),
 		CookieColor = Color3.fromRGB(214, 168, 106),
@@ -370,6 +373,48 @@ function GameConfig.getPassMultiplier(state: any): number
 	return multiplier
 end
 
+-- Leaderboards -------------------------------------------------------------
+--[[
+	Global top-ten boards, one OrderedDataStore each.
+
+	`Field` is the key in the player's state, so adding a board is a matter of
+	naming a number the game already tracks. `Format` decides how the value is
+	written on the board -- a playtime of 12,345 should read "3h 25m", not
+	"12.3K".
+
+	Bump `Version` to wipe a board and start it again; the old ordered store is
+	simply abandoned rather than migrated, which is the cheap and honest way to
+	reset a leaderboard.
+]]
+GameConfig.LeaderboardVersion = 1
+GameConfig.LeaderboardSize = 10
+
+GameConfig.Leaderboards = {
+	{ Id = "Cookies", Name = "Most Cookies", Icon = "🍪", Field = "totalCookies", Format = "number" },
+	{ Id = "Playtime", Name = "Most Playtime", Icon = "⏱️", Field = "playtime", Format = "time" },
+	{ Id = "Rebirths", Name = "Most Rebirths", Icon = "⭐", Field = "rebirths", Format = "number" },
+	{ Id = "Runes", Name = "Most Runes", Icon = "✦", Field = "runesOpened", Format = "number" },
+}
+
+-- Seconds -> "3h 25m". Anything under an hour reads in minutes, and a brand new
+-- player reads "0m" rather than an empty string.
+function GameConfig.formatDuration(seconds: number): string
+	local total = math.max(0, math.floor(seconds))
+	local hours = total // 3600
+	local minutes = (total % 3600) // 60
+	if hours >= 1 then
+		return `{hours}h {minutes}m`
+	end
+	return `{minutes}m`
+end
+
+function GameConfig.formatStat(board: any, value: number): string
+	if board.Format == "time" then
+		return GameConfig.formatDuration(value)
+	end
+	return GameConfig.abbreviate(value)
+end
+
 -- Rebirth ------------------------------------------------------------------
 -- Once BIG BEBEH is full you can start over. Areas reset, but you keep every
 -- upgrade and sprinkle, plus a permanent multiplier on everything you collect.
@@ -407,6 +452,7 @@ function GameConfig.getLandmark(areaIndex: number, key: string): Vector3
 		AltarOffset = Vector3.new(-(size.X / 2 - 26), 0, size.Z / 2 - 26),
 		ShopOffset = Vector3.new(size.X / 2 - 26, 0, size.Z / 2 - 26),
 		BoardOffset = Vector3.new(0, 0, -(size.Z / 2 - 6)),
+		LeaderboardOffset = Vector3.new(size.X / 2 - 10, 0, 0),
 	}
 	return center + (defaults[key] or Vector3.new())
 end

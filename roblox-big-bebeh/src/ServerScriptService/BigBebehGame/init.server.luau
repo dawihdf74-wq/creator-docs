@@ -21,8 +21,11 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local GameConfig = require(ReplicatedStorage.BigBebehShared.GameConfig)
 local Remotes = require(ReplicatedStorage.BigBebehShared.Remotes)
+local Theme = require(ReplicatedStorage.BigBebehShared.UI.Theme)
+local UI = require(ReplicatedStorage.BigBebehShared.UI.Components)
 local AntiCheat = require(script.AntiCheat)
 local BebehBuilder = require(script.BebehBuilder)
+local Leaderboard = require(script.Leaderboard)
 local PlayerState = require(script.PlayerState)
 local WorldBuilder = require(script.WorldBuilder)
 
@@ -286,6 +289,9 @@ local function collect(player: Player, model: Model, allowedRange: number?)
 
 	local gained = math.min(math.floor(value), capacity - state.carried)
 	state.carried += gained
+	-- Lifetime total for the leaderboard. Counts what reached your hands, so a
+	-- pickup that overflowed your capacity does not inflate the record.
+	state.totalCookies += gained
 
 	Remotes.CookiePop:FireClient(
 		player,
@@ -683,6 +689,158 @@ end)
 AntiCheat.start(function(player)
 	return PlayerState.get(player)
 end)
+
+-- Leaderboards -------------------------------------------------------------
+
+--[[
+	Playtime is counted here rather than from a join timestamp, so a server that
+	crashes loses at most one tick instead of the whole session.
+]]
+local PLAYTIME_TICK = 15
+
+task.spawn(function()
+	while true do
+		task.wait(PLAYTIME_TICK)
+		for _, state in PlayerState.all() do
+			state.playtime += PLAYTIME_TICK
+		end
+	end
+end)
+
+--[[
+	Fills a leaderboard face. The whole list is redrawn on each update rather
+	than diffed: ten rows is nothing, and a redraw cannot drift out of step with
+	the data the way an incremental update can.
+]]
+local function drawLeaderboard(face: BasePart, rows: { any })
+	local boardId = face:GetAttribute("BoardId") :: string
+	local board = nil
+	for _, entry in GameConfig.Leaderboards do
+		if entry.Id == boardId then
+			board = entry
+		end
+	end
+	if not board then
+		return
+	end
+
+	local gui = face:FindFirstChild("Board") :: SurfaceGui?
+	if not gui then
+		gui = Instance.new("SurfaceGui")
+		gui.Name = "Board"
+		gui.Face = Enum.NormalId.Front
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.PixelsPerStud = 48
+		gui.LightInfluence = 0
+		gui.Parent = face
+
+		local panel = UI.panel(gui, {
+			Name = "Root",
+			Size = UDim2.fromScale(1, 1),
+		})
+		UI.padding(panel, 3)
+		UI.list(panel, 1)
+
+		UI.label(panel, {
+			Name = "Title",
+			Size = UDim2.new(1, 0, 0, 40),
+			LayoutOrder = 0,
+			Font = Theme.font.display,
+			Text = `{board.Icon} {string.upper(board.Name)}`,
+			TextColor3 = Theme.color.text,
+			TextSize = Theme.textSize.lg,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		})
+
+		local list = Instance.new("Frame")
+		list.Name = "Rows"
+		list.BackgroundTransparency = 1
+		list.Size = UDim2.new(1, 0, 1, -46)
+		list.LayoutOrder = 1
+		list.Parent = panel
+		UI.list(list, 1)
+	end
+
+	local panel = gui:FindFirstChild("Root") :: Frame
+	local list = panel:FindFirstChild("Rows") :: Frame
+	for _, child in list:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+
+	if #rows == 0 then
+		UI.label(list, {
+			Size = UDim2.new(1, 0, 0, 30),
+			Text = "no one yet — be first",
+			TextColor3 = Theme.color.textFaint,
+			TextSize = Theme.textSize.sm,
+			TextXAlignment = Enum.TextXAlignment.Center,
+		})
+		return
+	end
+
+	for rank, row in rows do
+		local line = UI.row(list, {
+			Name = `Rank{rank}`,
+			Size = UDim2.new(1, 0, 0, 32),
+			LayoutOrder = rank,
+		})
+		-- The top three are the only rows anyone reads twice, so they keep full
+		-- contrast and the rest step back.
+		local rankColor = if rank == 1
+			then Theme.color.cookie
+			elseif rank <= 3 then Theme.color.text
+			else Theme.color.textDim
+
+		UI.label(line, {
+			Name = "Rank",
+			Size = UDim2.new(0, 34, 1, 0),
+			LayoutOrder = 0,
+			Text = `{rank}.`,
+			TextColor3 = rankColor,
+			TextSize = Theme.textSize.sm,
+		})
+		UI.label(line, {
+			Name = "Name",
+			Size = UDim2.new(1, -132, 1, 0),
+			LayoutOrder = 1,
+			Text = row.name,
+			TextColor3 = rankColor,
+			TextSize = Theme.textSize.sm,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+		})
+		UI.label(line, {
+			Name = "Value",
+			Size = UDim2.new(0, 90, 1, 0),
+			LayoutOrder = 2,
+			Text = GameConfig.formatStat(board, row.value),
+			TextColor3 = Theme.color.cookie,
+			TextSize = Theme.textSize.sm,
+			TextXAlignment = Enum.TextXAlignment.Right,
+		})
+	end
+end
+
+local function redraw(boardId: string, rows: { any })
+	for _, face in CollectionService:GetTagged("Leaderboard") do
+		if face:GetAttribute("BoardId") == boardId then
+			local ok, err = pcall(drawLeaderboard, face, rows)
+			if not ok then
+				warn(`[BigBebeh] Could not draw the {boardId} leaderboard: {err}`)
+			end
+		end
+	end
+end
+
+Leaderboard.onUpdate(redraw)
+Leaderboard.start(PlayerState.all)
+
+-- Draw the empty state immediately, so a fresh server shows boards rather than
+-- blank slabs while the first fetch is in flight.
+for _, board in GameConfig.Leaderboards do
+	redraw(board.Id, Leaderboard.top(board.Id))
+end
 
 -- The client pings this once its UI is built, so it never misses the first sync.
 Remotes.SyncState.OnServerEvent:Connect(function(player)

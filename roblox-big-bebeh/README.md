@@ -134,6 +134,47 @@ a `passes` field on purpose — so editing a save cannot hand anyone a pass they
 did not pay for. If the ownership check fails (a Roblox outage, say), it fails
 closed to "not owned" rather than granting the perk.
 
+## Leaderboards
+
+Four global boards stand in a row in zone 1, under **HALL OF CRUMBS**:
+
+| Board | Tracks |
+|---|---|
+| 🍪 Most Cookies | lifetime cookies collected |
+| ⏱️ Most Playtime | total time played, all sessions |
+| ⭐ Most Rebirths | rebirths |
+| ✦ Most Runes | runes opened |
+
+Each is an `OrderedDataStore`, top ten, refreshed about every 45 seconds. Adding
+a fifth board is one entry in `GameConfig.Leaderboards` naming a number the game
+already tracks — the world builds the extra board and the server fills it in.
+
+`Format = "time"` renders seconds as `3h 25m`; anything else abbreviates, so a
+cookie count reads `1.5M`.
+
+Both leaderboard stats are **lifetime totals that rebirth does not reset** — the
+board is a record of what you have done, not of your current run.
+
+The two loops run at deliberately different speeds. Publishing costs DataStore
+budget, so it only writes a value that actually changed, spaces players out
+rather than firing every write on one tick, and always writes on the way out the
+door. Reading is cheap, and nobody notices a leaderboard being thirty seconds
+stale.
+
+Values are floored and clamped to 2^53 before they are published, because
+ordered stores hold integers and a cookie total past that would start rounding —
+a board that disagrees with the player's own HUD is worse than one that
+saturates.
+
+Names are looked up once per user id and cached for the life of the server: the
+top ten barely changes between refreshes, and each lookup is a web call. A
+failed lookup falls back to the id rather than dropping the row, because a board
+with one odd-looking name beats a board with a hole in it.
+
+To wipe a board and start it again, bump `GameConfig.LeaderboardVersion`. The old
+ordered store is abandoned rather than migrated, which is the cheap and honest
+way to reset a leaderboard.
+
 ## Anti-cheat
 
 Two modules under `ServerScriptService/BigBebehGame`:
