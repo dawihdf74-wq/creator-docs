@@ -983,6 +983,67 @@ function WorldBuilder.build()
 	end
 ]=],
 })
+table.insert(PATCHES, {
+	target = "WorldBuilder",
+	label = [[
+WorldBuilder requires MapKeep]],
+	marker = [[
+require(script.Parent.MapKeep)]],
+	finds = {
+		[[
+local BebehBuilder = require(script.Parent.BebehBuilder)
+]],
+	},
+	replace = [[
+local BebehBuilder = require(script.Parent.BebehBuilder)
+local MapKeep = require(script.Parent.MapKeep)
+]],
+})
+table.insert(PATCHES, {
+	target = "WorldBuilder",
+	label = [[
+keep your builds across a rebuild]],
+	marker = [[
+MapKeep.detach(existing)]],
+	needs = [[
+require(script.Parent.MapKeep)]],
+	finds = {
+		[[
+	if existing then
+		existing:Destroy()
+	end
+]],
+	},
+	replace = [[
+	-- Lift your own builds out before the old world is destroyed, so a rebuild
+	-- never takes them with it.
+	local kept = MapKeep.detach(existing)
+
+	if existing then
+		existing:Destroy()
+	end
+]],
+})
+table.insert(PATCHES, {
+	target = "WorldBuilder",
+	label = [[
+replay your edits after a build]],
+	marker = [[
+MapKeep.finish(world, kept)]],
+	needs = [[
+MapKeep.detach(existing)]],
+	finds = {
+		[[
+	local spawnPart = Instance.new("SpawnLocation")
+]],
+	},
+	replace = [[
+	-- Put your builds back, then replay any recorded edits over the fresh map.
+	MapKeep.finish(world, kept)
+
+	local spawnPart = Instance.new("SpawnLocation")
+]],
+})
 
 local applied, skipped, missed = 0, 0, 0
 

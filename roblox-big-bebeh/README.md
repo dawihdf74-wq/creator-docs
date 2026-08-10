@@ -211,6 +211,39 @@ folder from an edit session are cleared on start, so they do not pile up.
 To go back to a generated map, clear the `HandEdited` attribute (or delete the
 folder) and press Play.
 
+## Keeping map edits while the map code still changes
+
+`HandEdited` freezes the map: your edits stay, but changes to `WorldBuilder` and
+`GameConfig` stop showing up. That is the wrong trade while you are still
+writing map code. `MapKeep` does the other thing — the map regenerates every
+start, and your edits are replayed on top.
+
+Two kinds of edit, handled two ways:
+
+- **Things you built.** Put them in `Workspace.BigBebehWorld.Custom`. That folder
+  is lifted out before the rebuild and put back after, so it is never touched.
+  Nothing needs recording.
+- **Things you changed** — a shop you dragged, a fence you recoloured, scenery
+  you deleted — are recorded in a `MapEdits` ModuleScript by
+  `tools/5_SaveMapEdits.lua` and replayed after every build.
+
+The workflow: edit the map in Studio → run `5_SaveMapEdits` → save the place.
+Then change map code as much as you like; each rebuild regenerates and re-applies.
+Run the tool again whenever you edit more — it rewrites the file from scratch, so
+it always describes the map as it stands.
+
+An override has to name the part it belongs to, and generated parts share names
+by the hundred (`Fence`, `Bush`). So every generated instance is stamped with a
+**BuildId**: its path plus its position among same-named siblings, e.g.
+`Areas/Area1_Cookie Nursery/Shop/Post#2`. Generation is deterministic, so the
+same part gets the same id every run.
+
+**The honest limit:** change the code so a part is no longer generated and its
+override has nowhere to land. Those are counted and warned about rather than
+silently dropped, so you find out instead of wondering where an edit went. Adding
+another part of the *same name in the same parent* also shifts the ones after it;
+re-run the tool after a change like that.
+
 ## Anti-cheat
 
 Two modules under `ServerScriptService/BigBebehGame`:
