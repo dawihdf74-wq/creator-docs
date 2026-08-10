@@ -126,10 +126,12 @@ if main then
 	end
 end
 
+-- Pressing Play is deliberately not the advice here. That map lives only inside
+-- the play session and is gone when you stop, so it is no use for editing.
 if not main then
-	say("NEXT    Press Play once (or run 4_EditableMap) to build a map.")
+	say("NEXT    Nothing to edit. Run BuildMapInStudio to put the map in Workspace.")
 elseif #main:GetDescendants() < 50 then
-	say("NEXT    This world is nearly empty. Delete it and press Play once to rebuild.")
+	say("NEXT    This world is nearly empty. Delete it, then run BuildMapInStudio to rebuild.")
 elseif not stampedAny then
 	say("NEXT    Nothing is stamped yet. 5_SaveMapEdits will stamp it for you.")
 else

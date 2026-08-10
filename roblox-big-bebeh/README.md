@@ -494,13 +494,32 @@ The world is generated when the **server starts**, so in edit mode Workspace is
 empty and there is no GUI — client scripts do not run until you press Play. That
 is expected, not a bug.
 
-To look at the map while editing, paste `tools/BuildMapInStudio.lua` into
-Studio's **Command Bar** (View → Command Bar) and press Enter. The whole map
-appears under `Workspace.BigBebehWorld`. Undo removes it.
+To get the map into Workspace where you can see and edit it, paste
+`tools/BuildMapInStudio.lua` into Studio's **Command Bar** (View → Command Bar)
+and press Enter. The whole map appears under `Workspace.BigBebehWorld` and stays
+there — it is part of the place now, not a preview.
 
-That preview is only for measuring and positioning: the map is rebuilt from
-`GameConfig` on every server start, so anything you place inside `BigBebehWorld`
-is discarded when you press Play. To change the map for real, edit `GameConfig`.
+Pressing Play is not a substitute. That map exists only inside the play session
+and is gone when you stop, so there is nothing to edit.
+
+This is the surface you edit, and the loop is:
+
+```
+BuildMapInStudio  ->  move / restyle / delete  ->  5_SaveMapEdits  ->  save place
+```
+
+`5_SaveMapEdits` records what you changed, and MapKeep replays it after every
+rebuild. So the map still regenerates — changes to `WorldBuilder` and
+`GameConfig` keep working — and your hand edits ride on top instead of being
+wiped. Anything you *build* yourself goes in `BigBebehWorld/Custom`, which is
+never regenerated at all.
+
+`BuildMapInStudio` refuses to rebuild over a populated world that has no
+`MapEdits` recording it, since those may be edits nobody has captured yet.
+
+That is the opposite trade from `4_EditableMap`, which freezes the map so it
+stops generating — and stops map code from having any effect. Use one or the
+other, not both.
 
 Note you do **not** need the map visible to install the Bebeh mesh — importing it
 to `ServerStorage` as `BigBebeh` is all that is required, and the game positions
