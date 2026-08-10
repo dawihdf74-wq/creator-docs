@@ -244,6 +244,21 @@ silently dropped, so you find out instead of wondering where an edit went. Addin
 another part of the *same name in the same parent* also shifts the ones after it;
 re-run the tool after a change like that.
 
+Stamping only ever fills in a *missing* id — an id already on a part is kept.
+Ordinals are positional, so reassigning them would mean deleting one part shifted
+every later sibling onto its neighbour's id, and that sibling's recorded edits
+would land on the wrong thing. A part duplicated by hand arrives carrying the
+original's id and is given a fresh one rather than shadowing it.
+
+`5_SaveMapEdits` refuses when fewer than half the generated parts match the map
+it just built, because "almost nothing matched" is two maps that do not
+correspond, and recording that would write a `MapEdits` that empties the world.
+It also clears a `MapEdits` already full of deletions rather than leave it armed.
+
+When a map tool says something surprising, **`tools/0_MapStatus.lua`** is the
+first thing to run: it only reads, and it reports what is in Workspace, how much
+of it is stamped, and what `MapEdits` will do on the next build.
+
 ## Anti-cheat
 
 Two modules under `ServerScriptService/BigBebehGame`:
