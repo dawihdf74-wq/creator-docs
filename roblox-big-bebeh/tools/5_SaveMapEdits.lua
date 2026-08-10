@@ -20,6 +20,10 @@
 
 local ServerScriptService = game:GetService("ServerScriptService")
 
+-- This file is generated, so a backslash escape would have to survive two
+-- languages to get here intact. One named constant avoids the whole problem.
+local NEWLINE = string.char(10)
+
 local report = {}
 local function say(line)
 	table.insert(report, line)
@@ -93,8 +97,78 @@ local function sameCFrame(a, b)
 	return true
 end
 
+--[[
+	Stamp the live map before reading it. Ids are purely structural -- a path
+	plus a position among same-named siblings -- so a map built before MapKeep
+	existed still gets the same ids the reference has, and the two line up.
+
+	Without this a pre-MapKeep map has no ids at all, every reference part looks
+	deleted, and the result is a MapEdits that wipes the whole map.
+]]
+MapKeep.stamp(live)
+
 local liveById = MapKeep.index(live)
 local refById = MapKeep.index(reference)
+
+local function countOf(map)
+	local n = 0
+	for _ in map do
+		n += 1
+	end
+	return n
+end
+
+local liveCount, refCount = countOf(liveById), countOf(refById)
+
+--[[
+	A sanity gate. Deleting a few bushes is an edit; "everything is missing" is
+	two maps that do not correspond, and writing that out would produce a
+	MapEdits that empties the map on the next build. Refuse rather than record
+	something that destructive.
+]]
+local function abandon(message)
+	reference:Destroy()
+	putBack()
+
+	-- A MapEdits written by an earlier run of this bug is worthless and
+	-- dangerous, so it is emptied rather than left to fire on the next build.
+	local existingEdits = folder:FindFirstChild("MapEdits")
+	if existingEdits and existingEdits:IsA("ModuleScript") then
+		local _, loaded = pcall(require, existingEdits)
+		local bad = 0
+		if type(loaded) == "table" and type(loaded.removed) == "table" then
+			for _ in loaded.removed do
+				bad += 1
+			end
+		end
+		if bad > refCount * 0.4 then
+			-- Built from a list rather than an escaped literal: this file is
+			-- generated, and a backslash escape here has to survive two languages.
+			existingEdits.Source = table.concat({
+				"-- Reset: an earlier capture recorded the whole map as deleted.",
+				"return { version = 1, props = {}, removed = {} }",
+				"",
+			}, NEWLINE)
+			message = message .. NEWLINE .. `RESET   Cleared a MapEdits that would have deleted {bad} parts.`
+		end
+	end
+	return message
+end
+
+if liveCount == 0 then
+	return abandon(
+		"FAILED  Nothing in your map carries a BuildId, even after stamping — it does not "
+			.. "look like a generated Big Bebeh map. Nothing was changed."
+	)
+end
+
+if liveCount < refCount * 0.5 then
+	return abandon(
+		`FAILED  Only {liveCount} of {refCount} parts matched the freshly built map, so this `
+			.. "would have recorded most of the map as deleted. Rebuild the map (delete "
+			.. "BigBebehWorld and press Play, or run 4_EditableMap) before capturing edits."
+	)
+end
 
 local props: { [string]: { [string]: any } } = {}
 local removed: { string } = {}
@@ -249,7 +323,11 @@ local applied, orphans = MapKeep.apply(reference, {
 	end)(),
 })
 
+say(`MATCHED {liveCount} of {refCount} generated parts.`)
 say(`SAVED   {changedCount} changed part(s), {removedCount} deleted, {customCount} thing(s) in Custom kept.`)
+if removedCount > refCount * 0.2 then
+	say(`WARNING {removedCount} deletions is a lot. If you did not delete that much, delete MapEdits and rebuild first.`)
+end
 say(`APPLIED {applied} edit(s) back onto the fresh map.`)
 if #orphans > 0 then
 	say(`NOTE    {#orphans} edit(s) had nowhere to land and were skipped.`)

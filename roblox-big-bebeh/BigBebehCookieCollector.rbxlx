@@ -4489,19 +4489,48 @@ end
 	The ordinal is per-name within a parent, so adding a new kind of part beside
 	an existing one does not renumber it -- only adding another part of the SAME
 	name in the SAME parent shifts the ones after it.
+
+	Stamping only ever FILLS IN a missing id; an id already on a part is kept.
+	That matters because ordinals are positional: if this renumbered, deleting one
+	part would shift every later sibling onto its neighbour's id, and the edits
+	recorded for those parts would land on the wrong things. Keeping stored ids
+	means a deletion costs exactly one id -- the deleted one.
 ]]
 function MapKeep.stamp(world: Instance)
 	local function walk(node: Instance, prefix: string)
+		local children = node:GetChildren()
+
+		-- Ids already present here, so a freshly stamped sibling cannot be handed
+		-- one of them. A hand-duplicated part arrives carrying the original's id;
+		-- the second one through is treated as unstamped and renamed.
+		local taken: { [string]: boolean } = {}
+		local keep: { [Instance]: string } = {}
+		for _, child in children do
+			local existing = child:GetAttribute("BuildId")
+			if type(existing) == "string" and not taken[existing] then
+				taken[existing] = true
+				keep[child] = existing
+			end
+		end
+
 		local counts: { [string]: number } = {}
-		for _, child in node:GetChildren() do
+		for _, child in children do
 			-- Your own folder is not generated, so it is not stamped.
 			if child.Name == CUSTOM_NAME and node == world then
 				continue
 			end
-			local n = (counts[child.Name] or 0) + 1
-			counts[child.Name] = n
-			local id = `{prefix}{child.Name}#{n}`
-			child:SetAttribute("BuildId", id)
+
+			local id = keep[child]
+			if not id then
+				local n = counts[child.Name] or 0
+				repeat
+					n += 1
+					id = `{prefix}{child.Name}#{n}`
+				until not taken[id]
+				counts[child.Name] = n
+				taken[id] = true
+				child:SetAttribute("BuildId", id)
+			end
 			walk(child, id .. "/")
 		end
 	end
