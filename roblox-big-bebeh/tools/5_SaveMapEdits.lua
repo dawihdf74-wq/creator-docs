@@ -130,8 +130,16 @@ local function abandon(message)
 	reference:Destroy()
 	putBack()
 
-	-- A MapEdits written by an earlier run of this bug is worthless and
-	-- dangerous, so it is emptied rather than left to fire on the next build.
+	--[[
+		A MapEdits written by an earlier run of this bug is worthless and
+		dangerous, so it goes -- and it is DESTROYED, not rewritten.
+
+		Rewriting the source does not work. Studio caches a ModuleScript's result
+		for the session, and counting the deletions just below requires the module,
+		which puts the bad table in that cache. The next build then requires the
+		same module, gets the cached table rather than the new source, and deletes
+		the map anyway. Destroying it leaves nothing to find and nothing to load.
+	]]
 	local existingEdits = folder:FindFirstChild("MapEdits")
 	if existingEdits and existingEdits:IsA("ModuleScript") then
 		local _, loaded = pcall(require, existingEdits)
@@ -142,14 +150,10 @@ local function abandon(message)
 			end
 		end
 		if bad > refCount * 0.4 then
-			-- Built from a list rather than an escaped literal: this file is
-			-- generated, and a backslash escape here has to survive two languages.
-			existingEdits.Source = table.concat({
-				"-- Reset: an earlier capture recorded the whole map as deleted.",
-				"return { version = 1, props = {}, removed = {} }",
-				"",
-			}, NEWLINE)
-			message = message .. NEWLINE .. `RESET   Cleared a MapEdits that would have deleted {bad} parts.`
+			existingEdits:Destroy()
+			message = message
+				.. NEWLINE
+				.. `DELETED A MapEdits that would have deleted {bad} parts. Nothing is replayed now.`
 		end
 	end
 	return message

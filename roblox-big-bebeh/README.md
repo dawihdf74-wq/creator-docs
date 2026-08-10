@@ -255,6 +255,12 @@ it just built, because "almost nothing matched" is two maps that do not
 correspond, and recording that would write a `MapEdits` that empties the world.
 It also clears a `MapEdits` already full of deletions rather than leave it armed.
 
+Clearing means **destroying** the module, not blanking its source. Studio caches
+a ModuleScript's result for the session, so a rewritten `MapEdits` keeps loading
+the old table — the map gets emptied on the next build even though the file says
+otherwise. Destroying it leaves nothing to find and nothing to load. The same
+applies by hand: to disable a `MapEdits`, delete it rather than empty it.
+
 When a map tool says something surprising, **`tools/0_MapStatus.lua`** is the
 first thing to run: it only reads, and it reports what is in Workspace, how much
 of it is stamped, and what `MapEdits` will do on the next build.

@@ -121,7 +121,28 @@ end
 
 say(`BUILT   {parts} part(s) in Workspace.{WORLD_NAME}, {stamped} stamped with a BuildId.`)
 
-if stamped == 0 then
+--[[
+	A build this small did not fail -- it was emptied afterwards, and the only
+	thing that empties a freshly built map is a MapEdits full of deletions.
+
+	Naming the wrong culprit is worse than saying nothing, so the MapEdits case is
+	checked before blaming the wiring: "nothing was stamped" is true either way,
+	because parts are stamped and then deleted.
+]]
+if parts < 50 then
+	local edits = gameFolder:FindFirstChild("MapEdits")
+	if edits then
+		say("WARNING The map was built and then emptied. A MapEdits module is deleting it.")
+		say("        Fix: delete ServerScriptService.BigBebehGame.MapEdits, then run this again.")
+		say("        Emptying that file is not enough — Studio caches a module's result for")
+		say("        the session, so the old one keeps being used. Deleting it is what clears it.")
+	elseif stamped == 0 then
+		say("WARNING Almost nothing was built and nothing was stamped.")
+		say("        Run 1_InstallModules and 2_PatchHooks, then run this again.")
+	else
+		say("WARNING Almost nothing was built. Check the Output window for WorldBuilder errors.")
+	end
+elseif stamped == 0 then
 	say("WARNING Nothing was stamped — MapKeep is not wired into WorldBuilder.")
 	say("        Run 1_InstallModules and 2_PatchHooks, then run this again.")
 end
