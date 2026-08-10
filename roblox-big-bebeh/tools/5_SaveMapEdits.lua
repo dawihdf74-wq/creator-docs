@@ -37,7 +37,7 @@ end
 local WORLD_NAME = "BigBebehWorld"
 local live = workspace:FindFirstChild(WORLD_NAME)
 if not live then
-	return "FAILED  No BigBebehWorld in Workspace. Press Play once, or run 4_EditableMap, then edit the map."
+	return "FAILED  No BigBebehWorld in Workspace. Run BuildMapInStudio to put the map there, then edit it."
 end
 
 if live:GetAttribute("HandEdited") then

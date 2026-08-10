@@ -265,6 +265,15 @@ When a map tool says something surprising, **`tools/0_MapStatus.lua`** is the
 first thing to run: it only reads, and it reports what is in Workspace, how much
 of it is stamped, and what `MapEdits` will do on the next build.
 
+For **"Requested module experienced an error while loading"**, run
+**`tools/0_CheckModules.lua`**. That message names the module you asked for, not
+the one that broke — a bad `GameConfig` makes `require(WorldBuilder)` fail, so
+Roblox blames `WorldBuilder`. The tool loads each module on its own in dependency
+order and names the first real failure, marking the rest as echoes. Studio also
+caches a failed module for the session, so every later require returns the same
+generic text; when everything reads as an echo, restart Studio to get the real
+error with a line number.
+
 ## Anti-cheat
 
 Two modules under `ServerScriptService/BigBebehGame`:
