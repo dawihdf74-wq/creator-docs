@@ -1,0 +1,9 @@
+# The repository root sets `* text eol=lf`. That is an explicit `text` attribute rather than
+# `text=auto`, so git applies CRLF->LF normalisation to every file without running its binary
+# detection - which would silently strip 0x0D bytes out of the model and texture files and ship
+# a corrupted asset. Mark them binary so they round-trip byte for byte.
+*.blend binary
+*.fbx   binary
+*.glb   binary
+*.gltf  binary
+*.png   binary
