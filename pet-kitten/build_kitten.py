@@ -10,13 +10,15 @@ re-run to get a new build. Nothing is authored by hand in a .blend.
 
 Design notes
 ------------
-* All rounded forms are subdivided cubes ("quad spheres") rather than UV spheres or cones, so
-  the mesh is 100% quads with no pole triangles or n-gon caps. Roblox asks for quads where
-  possible, and Catmull-Clark blobs give exactly the soft PSX silhouette we want anyway.
-* Roblox allows one material per mesh object, so colour comes from a palette atlas: a texture of
-  flat colour swatches with each part's UVs pinned inside its swatch. Eyes, blush and highlights
-  are geometry mapped to a swatch, not painted texture detail, so the pet stays crisp at any
-  distance and still reads correctly even if the texture goes missing.
+* Everything is a flat-shaded cuboid - hard edges, no subdivision, no smooth shading. That is
+  the Pet Sim cube-pet look, and it lands at ~156 triangles. Wedge shapes (ears, bow lobes)
+  taper to a narrow edge rather than collapsing to a point, so every face stays a quad.
+* Roblox allows one material per mesh object, so the single texture carries both the drawn face
+  and a grid of flat colour swatches. Every face pins into a swatch except the head box's front,
+  which the face art is projected onto. The head's front face is deliberately square, because a
+  non-square one stretches the artwork.
+* The face is drawn procedurally, but dropping a square image at textures/face_source.png
+  overrides it - the way to get a true 1-to-1 with hand-drawn brand art.
 * Animations use location and rotation keys only. Roblox drives joints with CFrames, which carry
   no scale, so bone-scale squash-and-stretch would be silently dropped on import. The bounce
   fakes squash by moving parts instead.
@@ -52,15 +54,25 @@ NAME = "Kitten"
 STUD_CM = 28.0
 TARGET_HEIGHT_CM = 80.0
 
-# Palette atlas. 256px, 4x4 grid of 64px swatches; UVs sit in the middle 50% of each swatch so
-# mipmapping can never bleed one colour into its neighbour.
-ATLAS_PX = 256
-ATLAS_GRID = 4
+# Texture atlas, 512px, split into two zones:
+#   - the face is drawn into the top-left quadrant and mapped onto the head box's front face
+#   - the bottom half is a 4x2 grid of flat colour swatches every other face pins into
+# UVs sit in the middle 50% of each swatch so mipmapping cannot bleed one colour into its
+# neighbour.
+ATLAS_PX = 512
+SWATCH_COLS = 4
+SWATCH_ROWS = 2
+SWATCH_ZONE_V = 0.5                     # swatches occupy v in [0, 0.5]
 
-PINK = 0      # body, head, ears, legs, tail
-HOTPINK = 1   # inner ears, blush, nose
-BLACK = 2     # eyes, bow, mouth
-WHITE = 3     # eye highlights, muzzle, chest, paw tips
+FACE_RECT = (0.02, 0.52, 0.48, 0.98)    # u0, v0, u1, v1 - the drawn face, inset from the edges
+
+# Drop a square image here to use real artwork as the face instead of the procedural one.
+FACE_SOURCE = os.path.join(DIR_TEX, "face_source.png")
+
+PINK = 0      # body, head, ears, tail
+HOTPINK = 1   # inner ears
+BLACK = 2     # bow, feet
+WHITE = 3     # spare / fail-soft
 
 PALETTE = {
     PINK: "#F7B6CE",
@@ -68,15 +80,6 @@ PALETTE = {
     BLACK: "#1A1A1A",
     WHITE: "#FFFFFF",
 }
-
-# Head is an ellipsoid; face features are placed on its surface analytically.
-HEAD_C = Vector((0.0, 0.0, 50.0))
-HEAD_R = Vector((24.0, 21.0, 21.0))
-
-# The muzzle is its own ellipsoid, and the nose and mouth are placed against *it* rather than
-# against the head, otherwise they end up buried inside it.
-MUZZLE_C = Vector((0.0, -18.5, 41.5))
-MUZZLE_R = Vector((7.5, 5.0, 5.0))
 
 # The kitten faces -Y. With up = +Z that puts the character's own left at +X.
 FRONT = -1.0
@@ -120,23 +123,21 @@ def apply_modifiers(obj):
     bpy.data.meshes.remove(old)
 
 
-def make_blob(name, location=(0, 0, 0), scale=(1, 1, 1), rotation=(0, 0, 0),
-              subdiv=3, taper_axis=None, taper_neg=1.0, taper_pos=1.0,
-              bend_angle=0.0, bend_axis="X"):
+def make_box(name, location=(0, 0, 0), scale=(1, 1, 1), rotation=(0, 0, 0),
+             taper_axis=None, taper_neg=1.0, taper_pos=1.0):
     """
-    A rounded all-quad form: a cube, optionally tapered along one axis, then Catmull-Clark
-    subdivided into a smooth blob. This is the single building block for the whole pet.
+    A flat-shaded cuboid - the single building block for the whole pet.
 
     taper_neg / taper_pos scale the cross-section at the negative / positive end of taper_axis,
-    which turns the cube into a cone, teardrop or bow lobe before it gets rounded off.
+    turning the cube into a wedge for the ears and the bow lobes. Tapering to a narrow edge
+    rather than collapsing to a point keeps every face a quad while still reading as a triangle.
 
-    After subdivision the blob is normalised so `scale` means the final half-extents on each
-    axis. Catmull-Clark shrinks a cube to roughly 78% of its cage, and without normalising that
-    the face features computed against HEAD_R would float off the head.
+    `scale` is the half-extent on each axis. No subdivision and no smooth shading: the hard
+    edges and flat facets are the whole point of the look.
 
-    All transforms are baked straight into the mesh data. Reading obj.matrix_world here would
-    return a stale identity, because a freshly linked object has not been through a depsgraph
-    evaluation yet.
+    All transforms are baked straight into the mesh data via matrix_basis. Reading
+    obj.matrix_world here would return a stale identity, because a freshly linked object has not
+    been through a depsgraph evaluation yet.
     """
     mesh = bpy.data.meshes.new(name)
     obj = bpy.data.objects.new(name, mesh)
@@ -156,75 +157,86 @@ def make_blob(name, location=(0, 0, 0), scale=(1, 1, 1), rotation=(0, 0, 0),
     bm.to_mesh(mesh)
     bm.free()
 
-    mod = obj.modifiers.new("subsurf", "SUBSURF")
-    mod.levels = subdiv
-    mod.render_levels = subdiv
-    apply_modifiers(obj)
-
-    # Normalise to unit half-extents, then out to the requested size.
-    verts = obj.data.vertices
-    extent = [max(abs(v.co[i]) for v in verts) for i in range(3)]
-    for v in verts:
+    for v in mesh.vertices:
         for i in range(3):
-            if extent[i] > 1e-9:
-                v.co[i] = v.co[i] / extent[i] * scale[i]
-
-    # Bend once the part is at its true proportions, about the origin it is still centred on.
-    if bend_angle:
-        bend = obj.modifiers.new("bend", "SIMPLE_DEFORM")
-        bend.deform_method = "BEND"
-        bend.deform_axis = bend_axis
-        bend.angle = bend_angle
-        apply_modifiers(obj)
+            v.co[i] *= scale[i]
 
     matrix = Matrix.Translation(Vector(location)) @ Euler(rotation, "XYZ").to_matrix().to_4x4()
-    obj.data.transform(matrix)
+    mesh.transform(matrix)
 
-    for poly in obj.data.polygons:
-        poly.use_smooth = True
+    for poly in mesh.polygons:
+        poly.use_smooth = False
 
     return obj
 
 
-def surface_y(centre, radii, x, z, out=0.0):
+def swatch_rect(swatch):
+    """UV rect of a flat colour cell, inset so mip levels can't bleed between neighbours."""
+    cell_u = 1.0 / SWATCH_COLS
+    cell_v = SWATCH_ZONE_V / SWATCH_ROWS
+    col = swatch % SWATCH_COLS
+    row = swatch // SWATCH_COLS
+    iu, iv = cell_u * 0.25, cell_v * 0.25
+    return (col * cell_u + iu, row * cell_v + iv,
+            (col + 1) * cell_u - iu, (row + 1) * cell_v - iv)
+
+
+def face_direction(normal):
+    """Classify a box face by its normal's dominant axis and sign."""
+    axis = max(range(3), key=lambda i: abs(normal[i]))
+    positive = normal[axis] > 0
+    if axis == 0:
+        return "left" if positive else "right"      # character's left is +X
+    if axis == 1:
+        return "back" if positive else "front"      # the pet faces -Y
+    return "top" if positive else "bottom"
+
+
+def set_part_uv(obj, swatch, overrides=None):
     """
-    Front-facing Y on an ellipsoid for a given (x, z), so features sit on its surface.
+    Pin each face into a palette swatch, with optional per-direction overrides.
 
-    `out` is signed along the facing direction: positive pushes the feature outward, in front of
-    the surface; negative sinks it in. Getting this backwards buries the feature inside the body
-    it was meant to sit on.
+    An override value is either another swatch index or the literal string "face", which
+    projects the drawn face texture onto that side.
     """
-    nx = (x - centre.x) / radii.x
-    nz = (z - centre.z) / radii.z
-    inner = max(0.0, 1.0 - nx * nx - nz * nz)
-    return centre.y + FRONT * (radii.y * math.sqrt(inner) + out)
-
-
-def head_surface_y(x, z, out=0.0):
-    return surface_y(HEAD_C, HEAD_R, x, z, out)
-
-
-def muzzle_surface_y(x, z, out=0.0):
-    return surface_y(MUZZLE_C, MUZZLE_R, x, z, out)
-
-
-def set_part_uv(obj, swatch):
-    """Pin every face of a part inside its palette swatch (non-degenerate, mip-safe)."""
-    cell = 1.0 / ATLAS_GRID
-    col = swatch % ATLAS_GRID
-    row = swatch // ATLAS_GRID
-    inset = cell * 0.25
-    u0, u1 = col * cell + inset, (col + 1) * cell - inset
-    v0, v1 = row * cell + inset, (row + 1) * cell - inset
-    corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
-
     mesh = obj.data
     if not mesh.uv_layers:
         mesh.uv_layers.new(name="UVMap")
     uvs = mesh.uv_layers[0]
+    overrides = overrides or {}
+
     for poly in mesh.polygons:
+        target = overrides.get(face_direction(poly.normal), swatch)
+
+        if target == "face":
+            project_face_uv(mesh, poly, uvs)
+            continue
+
+        u0, v0, u1, v1 = swatch_rect(target)
+        corners = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)]
         for i, loop_index in enumerate(poly.loop_indices):
             uvs.data[loop_index].uv = corners[i % 4]
+
+
+def project_face_uv(mesh, poly, uvs):
+    """
+    Map the drawn face onto a front-facing quad, derived from vertex positions rather than loop
+    order so the orientation is deterministic.
+
+    Viewed from -Y with up = +Z, screen-right is -X. So u must grow as x shrinks; getting that
+    backwards gives a mirrored face, and swapping v gives an upside-down one - neither of which
+    any geometry assertion would catch.
+    """
+    coords = [mesh.vertices[i].co for i in poly.vertices]
+    x_min, x_max = min(c.x for c in coords), max(c.x for c in coords)
+    z_min, z_max = min(c.z for c in coords), max(c.z for c in coords)
+    u0, v0, u1, v1 = FACE_RECT
+
+    for loop_index, vert_index in zip(poly.loop_indices, poly.vertices):
+        co = mesh.vertices[vert_index].co
+        fu = (x_max - co.x) / (x_max - x_min) if x_max > x_min else 0.0
+        fv = (co.z - z_min) / (z_max - z_min) if z_max > z_min else 0.0
+        uvs.data[loop_index].uv = (u0 + fu * (u1 - u0), v0 + fv * (v1 - v0))
 
 
 def set_part_bones(obj, bones):
@@ -243,10 +255,10 @@ def set_part_bones(obj, bones):
         group.add(indices, weight, "REPLACE")
 
 
-def part(name, bone, swatch, **kwargs):
+def part(name, bone, swatch, overrides=None, **kwargs):
     """Build one body part and tag it with its bone(s) and palette colour."""
-    obj = make_blob(name, **kwargs)
-    set_part_uv(obj, swatch)
+    obj = make_box(name, **kwargs)
+    set_part_uv(obj, swatch, overrides)
     set_part_bones(obj, bone)
     return obj
 
@@ -255,31 +267,155 @@ def part(name, bone, swatch, **kwargs):
 # Texture
 # --------------------------------------------------------------------------------------------
 
-def srgb_to_linear(c):
-    c = c / 255.0
-    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+def rgb01(hex_colour):
+    """
+    Hex to 0..1, with no sRGB-to-linear conversion.
+
+    Blender writes byte-image pixels straight through to the PNG without applying the datablock's
+    colourspace, so values written here land in the file verbatim. Converting to linear first
+    would bake the transform into the file and ship visibly oversaturated colours.
+    """
+    return np.array([int(hex_colour[i:i + 2], 16) / 255.0 for i in (1, 3, 5)], dtype=np.float32)
+
+
+# Face layout in 0..1 coordinates of the face zone, origin bottom-left.
+#
+# This reproduces the kawaii face from the user's own template art - large dark doll eyes with
+# lashes at the outer corners, big glossy highlights, soft pink blush and a small "w" mouth.
+# Deliberately no cat whiskers: those came from the Pet Sim reference, not from their brand art.
+#
+# BLUSH_X is measured out from the centre line - keep it wide enough to land on the cheeks, or
+# the blush merges with the mouth into one pink band across the middle of the face.
+EYE_X, EYE_Y = 0.275, 0.585
+EYE_RX, EYE_RY = 0.135, 0.170
+LASH_COUNT = 3
+MOUTH_Y = 0.330
+BLUSH_X, BLUSH_Y = 0.330, 0.345
+
+
+def _ellipse(xx, yy, cx, cy, rx, ry):
+    return ((xx - cx) / rx) ** 2 + ((yy - cy) / ry) ** 2 <= 1.0
+
+
+def _segment(xx, yy, x0, y0, x1, y1, width):
+    """Distance field to a line segment, for whiskers and mouth strokes."""
+    dx, dy = x1 - x0, y1 - y0
+    length_sq = dx * dx + dy * dy
+    t = np.clip(((xx - x0) * dx + (yy - y0) * dy) / length_sq, 0.0, 1.0)
+    return np.hypot(xx - (x0 + t * dx), yy - (y0 + t * dy)) <= width
+
+
+def load_face_image(size):
+    """
+    Use the artist's own face artwork if they've dropped it in, instead of the drawn face.
+
+    Put a square image at textures/face_source.png and it becomes the pet's face verbatim - the
+    only way to get a true 1-to-1 with hand-drawn brand art. Anything with alpha is composited
+    over the body pink so the face still sits flush on the box. Returns None when absent.
+    """
+    if not os.path.exists(FACE_SOURCE):
+        return None
+
+    img = bpy.data.images.load(FACE_SOURCE)
+    w, h = img.size
+    src = np.array(img.pixels[:], dtype=np.float32).reshape(h, w, 4)
+    bpy.data.images.remove(img)
+
+    if img.colorspace_settings.name != "sRGB":
+        log(f"  note: {os.path.basename(FACE_SOURCE)} is not sRGB, colours may shift")
+
+    # Nearest-neighbour resample to the atlas slot - no scipy/Pillow in this environment.
+    rows = (np.arange(size) * h // size).clip(0, h - 1)
+    cols = (np.arange(size) * w // size).clip(0, w - 1)
+    resampled = src[rows][:, cols]
+
+    rgb, alpha = resampled[:, :, 0:3], resampled[:, :, 3:4]
+    return rgb * alpha + rgb01(PALETTE[PINK]) * (1.0 - alpha)
+
+
+def draw_face(size):
+    """
+    Draw the cat face at `size` px square, returning linear RGB.
+
+    Rendered at 4x and box-downsampled, because the alternative - hard boolean masks at final
+    resolution - gives visibly jagged eyes on a face this large on screen.
+    """
+    ss = 4
+    n = size * ss
+    axis = (np.arange(n, dtype=np.float32) + 0.5) / n
+    xx, yy = np.meshgrid(axis, axis)          # yy grows upward, matching Blender's image origin
+
+    pink, hotpink = rgb01(PALETTE[PINK]), rgb01(PALETTE[HOTPINK])
+    black, white = rgb01(PALETTE[BLACK]), rgb01(PALETTE[WHITE])
+
+    buf = np.empty((n, n, 3), dtype=np.float32)
+    buf[:, :] = pink
+
+    def paint(mask, colour):
+        buf[mask] = colour
+
+    for sx in (-1, 1):
+        cx = 0.5 + sx * EYE_X
+
+        # Blush first, so the eye sits over it rather than being cut into by it.
+        paint(_ellipse(xx, yy, 0.5 + sx * BLUSH_X, BLUSH_Y, 0.082, 0.052), hotpink)
+
+        # Lashes fan up and out from the eye's outer corner.
+        for i in range(LASH_COUNT):
+            t = i / max(LASH_COUNT - 1, 1)
+            angle = math.radians(18.0 + t * 42.0)
+            x0 = cx + sx * EYE_RX * 0.80
+            y0 = EYE_Y + EYE_RY * (0.30 + t * 0.52)
+            reach = 0.088 - t * 0.018
+            paint(_segment(xx, yy, x0, y0,
+                           x0 + sx * reach * math.cos(angle),
+                           y0 + reach * math.sin(angle), 0.0088), black)
+
+        # Big dark doll eye with two glossy highlights - the template's signature look.
+        paint(_ellipse(xx, yy, cx, EYE_Y, EYE_RX, EYE_RY), black)
+        paint(_ellipse(xx, yy, cx - sx * 0.040, EYE_Y + 0.058, 0.050, 0.058), white)
+        paint(_ellipse(xx, yy, cx + sx * 0.052, EYE_Y - 0.060, 0.028, 0.032), white)
+
+    # Small "w" mouth, centred.
+    for sx in (-1, 1):
+        paint(_segment(xx, yy, 0.5, MOUTH_Y + 0.034,
+                       0.5 + sx * 0.048, MOUTH_Y - 0.002, 0.0090), black)
+        paint(_segment(xx, yy, 0.5 + sx * 0.048, MOUTH_Y - 0.002,
+                       0.5 + sx * 0.088, MOUTH_Y + 0.036, 0.0090), black)
+
+    return buf.reshape(size, ss, size, ss, 3).mean(axis=(1, 3))
 
 
 def build_texture():
-    """Write the flat-colour palette atlas that the single material samples."""
+    """Write the atlas: flat colour swatches plus the drawn face."""
     img = bpy.data.images.new(f"{NAME}_ALB", ATLAS_PX, ATLAS_PX, alpha=False)
     img.colorspace_settings.name = "sRGB"
 
     pixels = np.zeros((ATLAS_PX, ATLAS_PX, 4), dtype=np.float32)
     pixels[:, :, 3] = 1.0
-    cell_px = ATLAS_PX // ATLAS_GRID
+    # Anything not explicitly painted falls back to body pink, so a UV mistake fails soft
+    # rather than showing up as a black patch.
+    pixels[:, :, 0:3] = rgb01(PALETTE[PINK])
 
-    # Unused swatches default to the body pink, so a UV mistake fails soft rather than black.
-    default = [srgb_to_linear(int(PALETTE[PINK][i:i + 2], 16)) for i in (1, 3, 5)]
-    pixels[:, :, 0:3] = default
-
+    cell_w = ATLAS_PX // SWATCH_COLS
+    cell_h = int(ATLAS_PX * SWATCH_ZONE_V) // SWATCH_ROWS
     for swatch, hex_colour in PALETTE.items():
-        rgb = [srgb_to_linear(int(hex_colour[i:i + 2], 16)) for i in (1, 3, 5)]
-        col = swatch % ATLAS_GRID
-        row = swatch // ATLAS_GRID
-        y0, y1 = row * cell_px, (row + 1) * cell_px
-        x0, x1 = col * cell_px, (col + 1) * cell_px
-        pixels[y0:y1, x0:x1, 0:3] = rgb
+        col, row = swatch % SWATCH_COLS, swatch // SWATCH_COLS
+        pixels[row * cell_h:(row + 1) * cell_h,
+               col * cell_w:(col + 1) * cell_w, 0:3] = rgb01(hex_colour)
+
+    u0, v0, u1, v1 = FACE_RECT
+    x0, x1 = int(u0 * ATLAS_PX), int(u1 * ATLAS_PX)
+    y0, y1 = int(v0 * ATLAS_PX), int(v1 * ATLAS_PX)
+    face_px = min(x1 - x0, y1 - y0)
+
+    supplied = load_face_image(face_px)
+    if supplied is not None:
+        pixels[y0:y0 + face_px, x0:x0 + face_px, 0:3] = supplied
+        source = f"from {os.path.basename(FACE_SOURCE)}"
+    else:
+        pixels[y0:y0 + face_px, x0:x0 + face_px, 0:3] = draw_face(face_px)
+        source = "drawn"
 
     img.pixels = pixels.reshape(-1).tolist()
 
@@ -287,12 +423,17 @@ def build_texture():
     img.filepath_raw = out
     img.file_format = "PNG"
     img.save()
-    log(f"texture: {out} ({ATLAS_PX}x{ATLAS_PX}, {len(PALETTE)} swatches)")
+    log(f"texture: {out} ({ATLAS_PX}x{ATLAS_PX}, {len(PALETTE)} swatches, "
+        f"{face_px}px face, {source})")
     return img, out
 
 
 def build_material(img):
-    """One material, one image texture, nearest-neighbour so swatch edges never blend."""
+    """
+    One material, one image texture. Linear interpolation, unlike the flat-swatch-only version:
+    the drawn face needs smoothing, and the swatches are unaffected because their UVs sit well
+    inside each cell.
+    """
     mat = bpy.data.materials.new(f"{NAME}_Mat")
     mat.use_nodes = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
@@ -306,7 +447,7 @@ def build_material(img):
     tex = nodes.new("ShaderNodeTexImage")
     tex.location = (-250, 0)
     tex.image = img
-    tex.interpolation = "Closest"
+    tex.interpolation = "Linear"
 
     links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
     links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
@@ -317,118 +458,68 @@ def build_material(img):
 # Model
 # --------------------------------------------------------------------------------------------
 
-TAIL_P0 = Vector((0.0, 15.0, 25.0))    # tucked into the rear of the body
-TAIL_P1 = Vector((0.0, 36.0, 28.0))    # sweeps backward, staying low
-TAIL_P2 = Vector((0.0, 38.0, 46.0))    # then curls up, staying clear of the head
-# Segments must overlap generously or the tail reads as a string of beads rather than a tube.
-TAIL_SEGMENTS = 14
-TAIL_WHITE_TIP = 3
-
-
-def build_tail():
-    """Bead tapering spheres along a quadratic Bezier, white for the last few."""
-    segments = []
-    for i in range(TAIL_SEGMENTS):
-        t = i / (TAIL_SEGMENTS - 1)
-        pos = ((1 - t) ** 2 * TAIL_P0 + 2 * (1 - t) * t * TAIL_P1 + t ** 2 * TAIL_P2)
-        radius = 5.0 * (1 - t) + 2.6 * t
-        if i == TAIL_SEGMENTS - 1:
-            radius *= 1.35                       # slightly bulbous tip
-        # Smoothstep the weight along the tail so it bends as a chain, not a hinge.
-        w = t * t * (3 - 2 * t)
-        segments.append(part(
-            f"tail_{i}",
-            {"Tail_01": 1.0 - w, "Tail_02": w},
-            WHITE if i >= TAIL_SEGMENTS - TAIL_WHITE_TIP else PINK,
-            location=pos, scale=(radius, radius, radius), subdiv=2))
-    return segments
+# The head box's front face is deliberately SQUARE (x and z half-extents equal). The face
+# texture is square, so any other aspect would stretch the artwork - 46x40 stretched it 15%
+# horizontally, which is exactly the kind of distortion that ruins a 1-to-1 with brand art.
+HEAD_C = Vector((0.0, -7.0, 44.0))     # dominant front box, carries the face
+HEAD_R = Vector((23.0, 18.0, 23.0))
+# Deep enough to reach forward over the front feet as well as back to the rear ones. A shallower
+# body left the front feet floating with nothing joining them to the model.
+BODY_C = Vector((0.0, 8.0, 21.0))      # smaller box tucked behind and below
+BODY_R = Vector((16.5, 20.0, 15.0))
 
 
 def build_model(mat):
-    """Assemble the kitten from tagged parts, then join into a single mesh object."""
+    """Assemble the kitten from tagged boxes, then join into a single mesh object."""
     parts = []
 
-    # --- torso and head -----------------------------------------------------------------
-    # The head is deliberately wider than the body: that top-heavy ratio is the whole PSX look.
-    parts.append(part("body", "Body", PINK,
-                      location=(0, 0, 21), scale=(15.5, 17.5, 13), subdiv=3))
-    parts.append(part("chest", "Body", WHITE,
-                      location=(0, -15.0, 19), scale=(8.0, 4.6, 7.0), subdiv=2))
-    parts.append(part("head", "Head", PINK,
-                      location=HEAD_C, scale=HEAD_R, subdiv=3))
+    # --- head and body: two cuboids, the head dominant and carrying the drawn face -------
+    parts.append(part("head", "Head", PINK, overrides={"front": "face"},
+                      location=HEAD_C, scale=HEAD_R))
+    parts.append(part("body", "Body", PINK, location=BODY_C, scale=BODY_R))
 
-    # --- legs: four stubby cylinders with white paw tips --------------------------------
-    for tag, sx, sy in (("FL", 1, FRONT), ("FR", -1, FRONT), ("BL", 1, -FRONT), ("BR", -1, -FRONT)):
-        parts.append(part(f"leg_{tag}", f"Leg_{tag}", PINK,
-                          location=(sx * 9.5, sy * 11.5, 7), scale=(6.8, 7.0, 7.2), subdiv=2))
-        # Paws are wider than the leg at their height, or they hide inside it.
-        parts.append(part(f"paw_{tag}", f"Leg_{tag}", WHITE,
-                          location=(sx * 9.5, sy * 11.5, 2.8), scale=(7.4, 7.8, 3.6), subdiv=2))
+    # --- feet: small black boxes, the reference's contrast accent ------------------------
+    # Tall enough to overlap the body box; any gap reads as floating limbs.
+    for tag, sx, sy in (("FL", 1, FRONT), ("FR", -1, FRONT),
+                        ("BL", 1, -FRONT), ("BR", -1, -FRONT)):
+        parts.append(part(f"foot_{tag}", f"Leg_{tag}", BLACK,
+                          location=(sx * 12.0, sy * 13.0 + 3.0, 5.5),
+                          scale=(6.0, 6.5, 5.5)))
 
-    # --- ears: tapered teardrops with hot-pink inners -----------------------------------
+    # --- ears: thin wedges, tapered to a narrow top edge so they stay all-quads ----------
     for tag, sx in (("L", 1), ("R", -1)):
-        # A hard taper made these read as horns from the side; keep the tips rounded.
         parts.append(part(f"ear_{tag}", f"Ear_{tag}", PINK,
-                          location=(sx * 11.5, 0.5, 66), scale=(7.8, 5.8, 11),
-                          rotation=(0, sx * math.radians(-12), 0),
-                          subdiv=3, taper_axis="Z", taper_neg=1.0, taper_pos=0.24))
-        parts.append(part(f"ear_inner_{tag}", f"Ear_{tag}", HOTPINK,
-                          location=(sx * 11.5, -3.4, 65), scale=(4.6, 3.2, 7.4),
-                          rotation=(0, sx * math.radians(-12), 0),
-                          subdiv=2, taper_axis="Z", taper_neg=1.0, taper_pos=0.24))
+                          overrides={"front": HOTPINK},
+                          # Kept clear of the head's side faces at x=+-23: an ear reaching the
+                          # full width pokes its base corner through the side when it tilts.
+                          location=(sx * 13.5, -7.0, 70.0), scale=(7.5, 4.5, 9.0),
+                          rotation=(0, sx * math.radians(-8), 0),
+                          taper_axis="Z", taper_neg=1.0, taper_pos=0.12))
 
-    # --- face ---------------------------------------------------------------------------
-    parts.append(part("muzzle", "Head", WHITE,
-                      location=MUZZLE_C, scale=MUZZLE_R, subdiv=2))
-
-    for tag, sx in (("L", 1), ("R", -1)):
-        eye_x, eye_z = sx * 10.5, 54.0
-        parts.append(part(f"eye_{tag}", "Head", BLACK,
-                          location=(eye_x, head_surface_y(eye_x, eye_z, -1.0), eye_z),
-                          scale=(6.2, 4.0, 7.8), subdiv=3))
-        # Two highlights per eye - the big glossy dot plus a small sparkle, the PSX signature.
-        # Both must clear the eye's own front surface, not just the head's.
-        parts.append(part(f"glint_{tag}", "Head", WHITE,
-                          location=(eye_x + sx * 2.0,
-                                    head_surface_y(eye_x, eye_z, 4.2), eye_z + 2.6),
-                          scale=(2.2, 1.5, 2.6), subdiv=2))
-        parts.append(part(f"sparkle_{tag}", "Head", WHITE,
-                          location=(eye_x - sx * 2.3,
-                                    head_surface_y(eye_x, eye_z, 3.6), eye_z - 3.0),
-                          scale=(1.2, 1.0, 1.4), subdiv=1))
-        blush_x, blush_z = sx * 17.5, 47.0
-        parts.append(part(f"blush_{tag}", "Head", HOTPINK,
-                          location=(blush_x, head_surface_y(blush_x, blush_z, 0.3), blush_z),
-                          scale=(4.6, 2.4, 3.2), subdiv=2))
-
-    # Nose and mouth sit centred *on* the muzzle surface, so half of each reads as a raised
-    # bump. Offsetting them outward instead left them floating in front of the face.
-    nose_z = 44.0
-    parts.append(part("nose", "Head", HOTPINK,
-                      location=(0, muzzle_surface_y(0, nose_z), nose_z),
-                      scale=(2.4, 1.8, 1.8), subdiv=2))
-    mouth_z = 39.0
-    parts.append(part("mouth", "Head", BLACK,
-                      location=(0, muzzle_surface_y(0, mouth_z), mouth_z),
-                      scale=(2.0, 1.4, 1.2), subdiv=1))
-
-    # --- bow: two tapered lobes and a knot, matching the reference art ------------------
-    # Sits on the forehead where the head is still wide enough to carry it, in front of the ears.
-    bow_z, bow_y = 65.0, -13.0
+    # --- bow: two tapered lobes and a knot, the template's signature element -------------
+    bow_z, bow_y = 62.0, -25.5
     for sx in (1, -1):
         parts.append(part(f"bow_lobe_{'L' if sx > 0 else 'R'}", "Head", BLACK,
-                          location=(sx * 8.0, bow_y, bow_z), scale=(6.5, 4.2, 5.0),
-                          rotation=(0, 0, sx * math.radians(18)),
-                          subdiv=3, taper_axis="X",
-                          taper_neg=0.18 if sx > 0 else 1.0,
-                          taper_pos=1.0 if sx > 0 else 0.18))
+                          location=(sx * 8.5, bow_y, bow_z), scale=(6.5, 3.6, 5.0),
+                          rotation=(0, 0, sx * math.radians(16)),
+                          taper_axis="X",
+                          taper_neg=0.22 if sx > 0 else 1.0,
+                          taper_pos=1.0 if sx > 0 else 0.22))
     parts.append(part("bow_knot", "Head", BLACK,
-                      location=(0, bow_y - 0.6, bow_z), scale=(2.6, 2.6, 2.6), subdiv=2))
+                      location=(0, bow_y - 0.8, bow_z), scale=(2.8, 3.0, 2.8)))
 
-    # --- tail: blobs swept along a curve -------------------------------------------------
-    # A tapered-and-bent single blob came out looking like a shark fin. Beading spheres along a
-    # Bezier gives a tail that actually curls, and the weight blend along it comes for free.
-    parts.extend(build_tail())
+    # --- tail: three boxy segments stepping up behind the body ---------------------------
+    # Two chunky segments rather than three thin ones: three read as a row of disjointed steps,
+    # and they overlap deeply on purpose. Rigid boxes weighted to different bones pull apart the
+    # moment the tail bones rotate, and a shallow overlap opened a visible gap on the idle sway.
+    tail_steps = [
+        ((0.0, 26.0, 30.0), (6.0, 7.0, 10.0), -25, "Tail_01"),
+        ((0.0, 29.0, 44.0), (5.0, 6.0, 10.0), -10, "Tail_02"),
+    ]
+    for i, (loc, scale, tilt, bone) in enumerate(tail_steps):
+        parts.append(part(f"tail_{i}", bone, PINK,
+                          location=loc, scale=scale,
+                          rotation=(math.radians(tilt), 0, 0)))
 
     # --- join into one mesh object -------------------------------------------------------
     bpy.ops.object.select_all(action="DESELECT")
@@ -458,18 +549,19 @@ def build_model(mat):
 # --------------------------------------------------------------------------------------------
 
 # head, tail, parent. Root is deliberately non-deforming and sits at the origin.
+# Positioned against the boxy parts: Head at the base of the head box, legs at the foot tops.
 BONE_LAYOUT = [
-    ("Root",    (0, 0, 0),                 (0, 0, 8),                  None),
-    ("Body",    (0, 0, 18),                (0, 0, 32),                 "Root"),
-    ("Head",    (0, 0, 34),                (0, 0, 58),                 "Body"),
-    ("Ear_L",   (10, 0, 66),               (13, 0, 80),                "Head"),
-    ("Ear_R",   (-10, 0, 66),              (-13, 0, 80),               "Head"),
-    ("Tail_01", (0, -FRONT * 20, 26),      (0, -FRONT * 26, 38),       "Body"),
-    ("Tail_02", (0, -FRONT * 26, 38),      (0, -FRONT * 27, 52),       "Tail_01"),
-    ("Leg_FL",  (12, FRONT * 14, 12),      (12, FRONT * 14, 0),        "Body"),
-    ("Leg_FR",  (-12, FRONT * 14, 12),     (-12, FRONT * 14, 0),       "Body"),
-    ("Leg_BL",  (12, -FRONT * 14, 12),     (12, -FRONT * 14, 0),       "Body"),
-    ("Leg_BR",  (-12, -FRONT * 14, 12),    (-12, -FRONT * 14, 0),      "Body"),
+    ("Root",    (0, 0, 0),           (0, 0, 8),            None),
+    ("Body",    (0, 13, 14),         (0, 13, 30),          "Root"),
+    ("Head",    (0, -2, 24),         (0, -2, 50),          "Body"),
+    ("Ear_L",   (13.5, -7, 64),      (13.5, -7, 80),       "Head"),
+    ("Ear_R",   (-13.5, -7, 64),     (-13.5, -7, 80),      "Head"),
+    ("Tail_01", (0, 25, 24),         (0, 30, 34),          "Body"),
+    ("Tail_02", (0, 30, 34),         (0, 34, 50),          "Tail_01"),
+    ("Leg_FL",  (12, -10, 11),       (12, -10, 0),         "Body"),
+    ("Leg_FR",  (-12, -10, 11),      (-12, -10, 0),        "Body"),
+    ("Leg_BL",  (12, 16, 11),        (12, 16, 0),          "Body"),
+    ("Leg_BR",  (-12, 16, 11),       (-12, 16, 0),         "Body"),
 ]
 
 
@@ -575,14 +667,16 @@ def anim_bounce(rig):
     action = new_action(rig, "Bounce")
     p = rig.pose.bones
 
-    # frame, body dz, head dz, head pitch, leg splay
+    # frame, body dz, head dz, head pitch, leg splay.
+    # Splay is kept modest: these are rigid boxes, and a large rotation swings a foot's top face
+    # clean out of the body box, which reads as a detached limb.
     beats = [
         (1,   0.0,   0.0,   0,   0),
-        (7,  -4.0,  -2.5,   6,  14),   # crouch
-        (13,  9.0,   2.0,  -8, -18),   # launch
-        (20, 13.0,   3.0,  -5, -10),   # apex
-        (27, -3.5,  -2.0,   7,  16),   # land
-        (33,  1.5,   0.8,  -2,  -4),   # rebound
+        (7,  -4.0,  -2.5,   6,   9),   # crouch
+        (13,  9.0,   2.0,  -8, -12),   # launch
+        (20, 13.0,   3.0,  -5,  -7),   # apex
+        (27, -3.5,  -2.0,   7,  11),   # land
+        (33,  1.5,   0.8,  -2,  -3),   # rebound
         (40,  0.0,   0.0,   0,   0),
     ]
     for f, body_dz, head_dz, pitch, splay in beats:
@@ -609,8 +703,8 @@ def anim_walk(rig):
     for f, pitch in ((1, 0), (8, -4), (15, 0), (23, -4), (30, 0)):
         key(p["Head"], f, rotation=(pitch, 0, 0))
 
-    # Diagonal pairs swing opposite each other.
-    swing = 22
+    # Diagonal pairs swing opposite each other. Modest for the same rigid-box reason as Bounce.
+    swing = 15
     for tag, phase in (("Leg_FL", 0), ("Leg_BR", 0), ("Leg_FR", 1), ("Leg_BL", 1)):
         for f in (1, 8, 15, 23, 30):
             t = (f - 1) / 29.0
@@ -849,14 +943,15 @@ def setup_preview_world(resolution=700, samples=64):
     scene.render.film_transparent = False
     scene.view_settings.view_transform = "Standard"
 
-    # A soft near-neutral backdrop: a saturated pink world bounces enough colour onto the model
-    # to stop the white paws, chest and tail tip from reading as white.
+    # Flat-shaded boxes show blown highlights far more readily than curved surfaces did - a face
+    # lit straight on just clips to white. So most of the light is ambient, with the lamps only
+    # separating the facets.
     world = bpy.data.worlds.new("PreviewWorld")
     scene.world = world
     world.use_nodes = True
     bg = world.node_tree.nodes["Background"]
     bg.inputs["Color"].default_value = (0.97, 0.945, 0.96, 1.0)
-    bg.inputs["Strength"].default_value = 0.85
+    bg.inputs["Strength"].default_value = 0.75
 
     def add_light(name, location, energy, size):
         data = bpy.data.lights.new(name, type="AREA")
@@ -870,9 +965,11 @@ def setup_preview_world(resolution=700, samples=64):
         return obj
 
     # Light values are in watts against a centimetre-scaled scene, hence the large numbers.
-    add_light("key", (-90, -120, 140), 900000, 120)
-    add_light("fill", (130, -90, 60), 300000, 150)
-    add_light("rim", (40, 130, 110), 500000, 100)
+    # Tuned by sampling a rendered flat face against the texture's own pink: these land within
+    # ~0.04 of the true albedo, where the earlier values clipped the front face to pure white.
+    add_light("key", (-90, -120, 140), 150000, 160)
+    add_light("fill", (130, -90, 60), 63000, 170)
+    add_light("rim", (40, 130, 110), 97500, 120)
 
 
 def add_camera(location, target=Vector((0, 0, 42))):
