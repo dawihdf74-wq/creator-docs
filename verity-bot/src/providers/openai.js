@@ -13,7 +13,15 @@ function getClient() {
     if (!config.apiKey) {
       throw new Error('VERITY_API_KEY is not set — Verity has no way to reach the model.');
     }
-    client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl });
+    client = new OpenAI({
+      apiKey: config.apiKey,
+      baseURL: config.baseUrl,
+      // Retries 429s and 5xx with backoff, honouring retry-after. Kept low
+      // on purpose: a burst of retries feeds the same limit we are dodging,
+      // and throttle.js handles the sustained case.
+      maxRetries: 2,
+      timeout: 60_000,
+    });
   }
   return client;
 }

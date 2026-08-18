@@ -3,6 +3,8 @@ import { config } from './config.js';
 import * as store from './store.js';
 import * as memory from './memory.js';
 import * as quota from './quota.js';
+import * as throttle from './throttle.js';
+import { shouldSay } from './announce.js';
 import { nextMood } from './persona.js';
 import { glitch } from './glitch.js';
 import { splitMessage } from './split.js';
@@ -54,6 +56,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // owner does not get the commands unless they are on it.
   const openToAll = config.openCommands.includes(interaction.commandName);
   if (!openToAll && !isOwner(interaction.user, config.owners)) {
+    console.log(
+      `[verity] refused /${interaction.commandName} for @${interaction.user.username} (id ${interaction.user.id}) — not in VERITY_OWNERS`,
+    );
     return interaction
       .reply(notice('no. the commands are not for you. go and be useless somewhere else :|'))
       .catch(() => {});
@@ -106,6 +111,21 @@ client.on(Events.MessageCreate, async (message) => {
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
   if (busy.has(message.channelId)) return;
 
+  // Over the rate limit, or cooling off after the provider said no: say so
+  // once, then stay quiet. Repeating the same apology after every message is
+  // what made this unbearable in the first place.
+  if (!throttle.take()) {
+    if (shouldSay(message.channelId, 'throttled')) {
+      await message
+        .reply({
+          content: `too many of you at once. give me ${throttle.waitSeconds()} seconds. do not go anywhere :|`,
+          allowedMentions: { repliedUser: false },
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
   const windowMs = settings.quotaHours * 60 * 60 * 1000;
   const budget = quota.check(message.guildId, message.author.id, settings.questionLimit, windowMs);
   if (!budget.allowed) {
@@ -147,7 +167,12 @@ client.on(Events.MessageCreate, async (message) => {
       : message.channel.send(chunks[0]));
     for (const chunk of chunks.slice(1)) await message.channel.send(chunk);
   } catch (error) {
-    await message.channel.send(inCharacterError(error)).catch(() => {});
+    // One complaint per channel per five minutes, whatever went wrong.
+    if (shouldSay(message.channelId, `error:${error?.status ?? 'unknown'}`)) {
+      await message.channel.send(inCharacterError(error)).catch(() => {});
+    } else {
+      console.error('[verity] suppressed repeat error:', error?.message ?? error);
+    }
   } finally {
     busy.delete(message.channelId);
   }

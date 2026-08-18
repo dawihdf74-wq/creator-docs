@@ -102,6 +102,13 @@ instead of Claude's 700 — at a few hundred, Verity gets truncated mid-word or 
 nothing at all. Set `VERITY_REASONING_EFFORT=low` to make him think less and answer
 sooner; replies land in roughly 4–6 seconds either way.
 
+**Staying under the limit.** Verity caps himself at 8 model calls per minute across the
+whole bot (`VERITY_MAX_RPM`), which sits under every free tier's per-minute allowance. Go
+over it, or get rate-limited anyway, and he says so **once** and then goes quiet until it
+clears — repeating the same apology after every message is worse than silence. Each 429 in
+a row doubles his cooling-off period, starting at a minute, so an exhausted daily quota
+doesn't turn into a thousand pointless requests.
+
 **Free tier realities.** Expect something like 10–15 requests per minute and a few
 hundred to ~1,500 per day, and expect those numbers to be cut without notice. One reply =
 one request, so in an `all` channel at `chattiness: 100` a busy server drains the daily
@@ -163,6 +170,9 @@ Manage Messages.
 | `dms` | `true` | Whether he answers direct messages. |
 | `question-limit` | `10` | Answers each person gets per window. `0` removes the limit. |
 | `quota-hours` | `24` | How long that budget lasts before it refills. |
+
+Rate limiting is global rather than per-server, so it lives in `.env` as `VERITY_MAX_RPM`
+rather than in `/verity config`.
 
 ---
 
@@ -234,6 +244,8 @@ src/
   glitch.js           text corruption, prophecies, faces
   memory.js           per-channel conversation state
   quota.js            per-person question budgets
+  throttle.js         per-minute cap + backoff when the provider says no
+  announce.js         says a thing once, not after every message
   store.js            per-guild settings, persisted to data/guilds.json
   split.js            2000-character message splitting
   addressed.js        the name trigger

@@ -2,6 +2,7 @@ import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import * as quota from '../quota.js';
+import * as throttle from '../throttle.js';
 import { config } from '../config.js';
 import { nextMood } from '../persona.js';
 import { glitch } from '../glitch.js';
@@ -37,6 +38,12 @@ export async function execute(interaction) {
   if (!budget.allowed) {
     return interaction.reply(
       `that is all ${limits.questionLimit} of your questions, friend. you get more ${quota.resetTimestamp(budget.resetsAt)} :|`,
+    );
+  }
+
+  if (!throttle.take()) {
+    return interaction.reply(
+      `not right now. i am rationed. try again in ${throttle.waitSeconds()} seconds :|`,
     );
   }
 

@@ -44,6 +44,9 @@ export const config = {
   // Reasoning models (Gemini 3.x and friends) spend this budget on internal
   // thinking before they write a word, so the OpenAI-compatible path needs a
   // far bigger ceiling than Claude does or replies come back truncated.
+  // Hard ceiling on model calls per minute across the whole bot. Free tiers
+  // sit around 10-15 RPM, so this stays just under.
+  maxRpm: Number(process.env.VERITY_MAX_RPM || 8),
   maxTokens: Number(
     process.env.VERITY_MAX_TOKENS ||
       ((process.env.VERITY_PROVIDER || 'claude').toLowerCase() === 'openai' ? 2000 : 700),

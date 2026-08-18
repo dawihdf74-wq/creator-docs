@@ -18,6 +18,8 @@ import * as memory from '../src/memory.js';
 import * as store from '../src/store.js';
 import * as quota from '../src/quota.js';
 import { isOwner } from '../src/owners.js';
+import * as throttle from '../src/throttle.js';
+import { shouldSay, forget as forgetSaid } from '../src/announce.js';
 import { GREETING } from '../src/persona.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
@@ -282,6 +284,59 @@ await check('an admin reset hands the questions back', () => {
 await check('defaults ship the limit on at 10 a day', () => {
   assert.equal(config.defaults.questionLimit, 10);
   assert.equal(config.defaults.quotaHours, 24);
+});
+
+console.log('\nrate limiting');
+await check('the per-minute cap holds', () => {
+  throttle.succeeded();
+  let allowed = 0;
+  for (let i = 0; i < config.maxRpm + 5; i += 1) if (throttle.take()) allowed += 1;
+  assert.equal(allowed, config.maxRpm, 'lets exactly maxRpm through in one minute');
+  assert.equal(throttle.take(), false, 'and refuses the next one');
+  assert.ok(throttle.waitSeconds() > 0, 'reports how long to wait');
+});
+await check('a 429 puts him in a cooling-off period', () => {
+  throttle.rateLimited({ status: 429 });
+  assert.equal(throttle.isCooling(), true);
+  assert.equal(throttle.take(), false, 'no calls while cooling');
+  assert.ok(throttle.waitSeconds() >= 60, 'backs off at least a minute');
+});
+await check('retry-after from the provider is honoured', () => {
+  throttle.succeeded();
+  throttle.rateLimited({ status: 429, headers: { 'retry-after': '5' } });
+  const wait = throttle.waitSeconds();
+  assert.ok(wait > 0 && wait <= 5, `expected <=5s, got ${wait}`);
+});
+await check('repeat 429s back off further each time', () => {
+  throttle.succeeded();
+  throttle.rateLimited({ status: 429 });
+  const first = throttle.waitSeconds();
+  throttle.rateLimited({ status: 429 });
+  const second = throttle.waitSeconds();
+  assert.ok(second > first, `${second}s should exceed ${first}s`);
+});
+
+console.log('\nrepeat suppression');
+await check('he complains once, then shuts up', () => {
+  forgetSaid('chan-x', 'throttled');
+  assert.equal(shouldSay('chan-x', 'throttled'), true, 'first time speaks');
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal(shouldSay('chan-x', 'throttled'), false, 'every repeat stays silent');
+  }
+});
+await check('a different channel and a different problem still get through', () => {
+  assert.equal(shouldSay('chan-y', 'throttled'), true);
+  assert.equal(shouldSay('chan-x', 'error:500'), true);
+});
+await check('the window expires', () => {
+  forgetSaid('chan-z', 'throttled');
+  assert.equal(shouldSay('chan-z', 'throttled', 1), true);
+  return new Promise((resolve) =>
+    setTimeout(() => {
+      assert.equal(shouldSay('chan-z', 'throttled', 1), true, 'speaks again after the window');
+      resolve();
+    }, 5),
+  );
 });
 
 console.log('\nstore');

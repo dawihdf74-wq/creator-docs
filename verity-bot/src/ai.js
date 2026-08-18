@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import * as throttle from './throttle.js';
 import * as anthropic from './providers/anthropic.js';
 import * as openaiCompatible from './providers/openai.js';
 
@@ -9,7 +10,16 @@ import * as openaiCompatible from './providers/openai.js';
  */
 const provider = config.provider === 'openai' ? openaiCompatible : anthropic;
 
-export const speak = (options) => provider.speak(options);
+export async function speak(options) {
+  try {
+    const result = await provider.speak(options);
+    throttle.succeeded();
+    return result;
+  } catch (error) {
+    if (error?.status === 429) throttle.rateLimited(error);
+    throw error;
+  }
+}
 
 /**
  * Failures stay in character. A bot that says "Error: 429" breaks the bit and

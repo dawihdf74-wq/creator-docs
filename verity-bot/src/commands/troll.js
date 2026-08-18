@@ -1,6 +1,7 @@
 import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
+import * as throttle from '../throttle.js';
 import { buildTrollBrief, MOODS } from '../persona.js';
 import { glitch } from '../glitch.js';
 import { notice } from '../reply.js';
@@ -68,6 +69,12 @@ export async function execute(interaction) {
       notice(
         `He just did. Give ${target.username} ${Math.ceil((COOLDOWN_MS - since) / 1000)}s to recover.`,
       ),
+    );
+  }
+
+  if (!throttle.take()) {
+    return interaction.reply(
+      notice(`not right now. i am rationed. try again in ${throttle.waitSeconds()} seconds :|`),
     );
   }
 
