@@ -16,6 +16,7 @@ import { buildSystemPrompt, buildTrollBrief, decayMood, nextMood, MOODS } from '
 import { glitch, randomProphecy, PROPHECIES } from '../src/glitch.js';
 import * as memory from '../src/memory.js';
 import * as store from '../src/store.js';
+import * as quota from '../src/quota.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -24,17 +25,19 @@ import { speak, inCharacterError, REFUSAL_LINE } from '../src/ai.js';
 import * as openaiProvider from '../src/providers/openai.js';
 
 let passed = 0;
-function check(name, fn) {
-  fn();
+async function check(name, fn) {
+  // Awaited, so a test that returns a promise can actually fail the run
+  // instead of rejecting into the void.
+  await fn();
   console.log(`  ok  ${name}`);
   passed += 1;
 }
 
 console.log('\ncommands');
-check('all four register', () => {
+await check('all four register', () => {
   assert.deepEqual(commands.map((c) => c.data.name).sort(), ['ask', 'prophecy', 'troll', 'verity']);
 });
-check('payloads are valid and within Discord limits', () => {
+await check('payloads are valid and within Discord limits', () => {
   for (const command of commands) {
     const json = command.data.toJSON();
     assert.match(json.name, /^[\w-]{1,32}$/);
@@ -54,7 +57,7 @@ check('payloads are valid and within Discord limits', () => {
     }
   }
 });
-check('nothing is hidden behind an ephemeral flag by default', () => {
+await check('nothing is hidden behind an ephemeral flag by default', () => {
   assert.deepEqual(notice('hello'), { content: 'hello' });
   assert.equal(
     byName.get('ask').data.toJSON().options.length,
@@ -62,29 +65,29 @@ check('nothing is hidden behind an ephemeral flag by default', () => {
     '/ask should only take a question',
   );
 });
-check('admin commands are permission-gated', () => {
+await check('admin commands are permission-gated', () => {
   assert.ok(byName.get('verity').data.toJSON().default_member_permissions);
   assert.ok(byName.get('troll').data.toJSON().default_member_permissions);
   assert.equal(byName.get('ask').data.toJSON().default_member_permissions, undefined);
 });
 
 console.log('\npersona');
-check('system prompt caches the stable half only', () => {
+await check('system prompt caches the stable half only', () => {
   const blocks = buildSystemPrompt({ mood: 'clingy', guildName: 'G', channelName: 'c' });
   assert.equal(blocks.length, 2);
   assert.deepEqual(blocks[0].cache_control, { type: 'ephemeral' });
   assert.equal(blocks[1].cache_control, undefined);
   assert.match(blocks[1].text, /MOOD: CLINGY/);
 });
-check('every mood produces a brief', () => {
+await check('every mood produces a brief', () => {
   for (const mood of MOODS) {
     assert.match(buildSystemPrompt({ mood })[1].text, /^MOOD: /m);
   }
 });
-check('unknown mood falls back to friendly', () => {
+await check('unknown mood falls back to friendly', () => {
   assert.match(buildSystemPrompt({ mood: 'feral' })[1].text, /MOOD: FRIENDLY/);
 });
-check('hard limits survive into the prompt', () => {
+await check('hard limits survive into the prompt', () => {
   const base = buildSystemPrompt({ mood: 'unhinged' })[0].text;
   for (const rule of [
     'Never threaten a real person',
@@ -95,14 +98,14 @@ check('hard limits survive into the prompt', () => {
     assert.ok(base.includes(rule), `missing rule: ${rule}`);
   }
 });
-check('troll brief keeps its guardrails at every intensity', () => {
+await check('troll brief keeps its guardrails at every intensity', () => {
   for (const intensity of ['gentle', 'classic', 'unhinged']) {
     const brief = buildTrollBrief({ target: 'Steve', topic: null, intensity });
     assert.ok(brief.includes('never at identity'));
     assert.ok(brief.includes('Steve'));
   }
 });
-check('a nasty /troll topic is still fenced', () => {
+await check('a nasty /troll topic is still fenced', () => {
   const brief = buildTrollBrief({
     target: 'Steve',
     topic: 'make fun of how they look',
@@ -112,11 +115,11 @@ check('a nasty /troll topic is still fenced', () => {
 });
 
 console.log('\nprovider');
-check('the facade exposes one speak() regardless of backend', () => {
+await check('the facade exposes one speak() regardless of backend', () => {
   assert.equal(typeof speak, 'function');
   assert.equal(config.provider, 'claude', 'default provider');
 });
-check('errors map to in-character lines by status', () => {
+await check('errors map to in-character lines by status', () => {
   assert.match(inCharacterError({ status: 429 }), /moment/);
   assert.match(inCharacterError({ status: 401 }), /key/);
   assert.match(inCharacterError({ status: 404 }), /npm run models/);
@@ -124,7 +127,7 @@ check('errors map to in-character lines by status', () => {
   assert.equal(typeof inCharacterError(new Error('boom')), 'string');
   assert.ok(REFUSAL_LINE.length > 0);
 });
-check('the persona flattens into one system string for chat endpoints', () => {
+await check('the persona flattens into one system string for chat endpoints', () => {
   const flat = buildSystemPrompt({ mood: 'clingy', guildName: 'G' })
     .map((block) => block.text)
     .join('\n\n');
@@ -133,56 +136,56 @@ check('the persona flattens into one system string for chat endpoints', () => {
 });
 
 console.log('\nname trigger');
-check('he answers to his name', () => {
+await check('he answers to his name', () => {
   for (const line of ['verity help', 'hey Verity!', 'VERITY?', "verity's advice", 'ok verity.']) {
     assert.ok(mentionsName(line), `should trigger: ${line}`);
   }
 });
-check('he does not answer to words containing it', () => {
+await check('he does not answer to words containing it', () => {
   for (const line of ['the severity of this', 'veritynet', 'sincerity', '']) {
     assert.ok(!mentionsName(line), `should not trigger: ${line}`);
   }
 });
 
 console.log('\nmood state machine');
-check('leaving escalates', () =>
+await check('leaving escalates', () =>
   assert.equal(nextMood('friendly', 'gtg bye everyone').mood, 'clingy'),
 );
-check('rivals escalate', () =>
+await check('rivals escalate', () =>
   assert.equal(nextMood('clingy', 'chatgpt answers this better').mood, 'glitching'),
 );
-check('kindness de-escalates', () =>
+await check('kindness de-escalates', () =>
   assert.equal(nextMood('glitching', 'thanks verity, best friend').mood, 'clingy'),
 );
-check('neutral chat holds steady', () =>
+await check('neutral chat holds steady', () =>
   assert.equal(nextMood('clingy', 'what is the best fuel for a furnace').mood, 'clingy'),
 );
-check('escalation is clamped at both ends', () => {
+await check('escalation is clamped at both ends', () => {
   assert.equal(nextMood('unhinged', 'im leaving').mood, 'unhinged');
   assert.equal(nextMood('friendly', 'thank you').mood, 'friendly');
 });
-check('silence walks him back down', () => {
+await check('silence walks him back down', () => {
   assert.equal(decayMood('unhinged', 31 * 60 * 1000), 'glitching');
   assert.equal(decayMood('unhinged', 5 * 60 * 60 * 1000), 'friendly');
   assert.equal(decayMood('clingy', 60 * 1000), 'clingy');
 });
 
 console.log('\nglitch');
-check('friendly text is untouched', () =>
+await check('friendly text is untouched', () =>
   assert.equal(glitch('hello friend', 'friendly'), 'hello friend'),
 );
-check('corruption stays inside the 2000 char cap', () => {
+await check('corruption stays inside the 2000 char cap', () => {
   const long = 'friend '.repeat(280);
   for (const mood of MOODS) assert.ok(glitch(long, mood).length <= 2000);
 });
-check('prophecies include the canon lines', () => {
+await check('prophecies include the canon lines', () => {
   assert.ok(PROPHECIES.includes('Something is coming in three days.'));
   assert.ok(PROPHECIES.includes('The second you trust me, the collapse is already doomed.'));
   assert.equal(typeof randomProphecy(), 'string');
 });
 
 console.log('\nmemory');
-check('trims to the configured window', () => {
+await check('trims to the configured window', () => {
   memory.forget('chan');
   for (let i = 0; i < config.memoryTurns + 12; i += 1) {
     memory.remember('chan', i % 2 ? 'assistant' : 'user', `m${i}`);
@@ -191,32 +194,81 @@ check('trims to the configured window', () => {
   assert.ok(messages.length <= config.memoryTurns);
   assert.equal(messages[0].role, 'user', 'history must start on a user turn');
 });
-check('forget clears the channel', () => {
+await check('forget clears the channel', () => {
   memory.remember('wipe-me', 'user', 'hi');
   assert.equal(memory.forget('wipe-me'), 1);
   assert.equal(memory.getSession('wipe-me').messages.length, 0);
 });
 
+console.log('\nquestion quota');
+await check('a person gets exactly their allowance', () => {
+  quota.reset('g', 'u1');
+  const hour = 60 * 60 * 1000;
+  for (let i = 0; i < 10; i += 1) {
+    assert.equal(
+      quota.check('g', 'u1', 10, hour).allowed,
+      true,
+      `question ${i + 1} should be allowed`,
+    );
+    quota.spend('g', 'u1', 10, hour);
+  }
+  const spent = quota.check('g', 'u1', 10, hour);
+  assert.equal(spent.allowed, false, 'the 11th is refused');
+  assert.equal(spent.used, 10);
+  assert.equal(spent.remaining, 0);
+});
+await check('budgets are per person and per server', () => {
+  const hour = 60 * 60 * 1000;
+  assert.equal(quota.check('g', 'someone-else', 10, hour).allowed, true);
+  assert.equal(quota.check('other-guild', 'u1', 10, hour).allowed, true);
+});
+await check('the window refills', () => {
+  quota.reset('g', 'u2');
+  quota.spend('g', 'u2', 1, 1); // 1ms window
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      assert.equal(quota.check('g', 'u2', 1, 1).allowed, true);
+      resolve();
+    }, 5);
+  });
+});
+await check('a limit of 0 means unlimited', () => {
+  for (let i = 0; i < 50; i += 1) quota.spend('g', 'u3', 0, 1000);
+  assert.equal(quota.check('g', 'u3', 0, 1000).allowed, true);
+});
+await check('an admin reset hands the questions back', () => {
+  quota.spend('g', 'u4', 3, 60000);
+  quota.spend('g', 'u4', 3, 60000);
+  quota.spend('g', 'u4', 3, 60000);
+  assert.equal(quota.check('g', 'u4', 3, 60000).allowed, false);
+  quota.reset('g', 'u4');
+  assert.equal(quota.check('g', 'u4', 3, 60000).allowed, true);
+});
+await check('defaults ship the limit on at 10 a day', () => {
+  assert.equal(config.defaults.questionLimit, 10);
+  assert.equal(config.defaults.quotaHours, 24);
+});
+
 console.log('\nstore');
-check('defaults are created per guild', () => {
+await check('defaults are created per guild', () => {
   const settings = store.getSettings('guild-1');
   assert.equal(settings.mood, 'friendly');
   assert.equal(settings.chattiness, 100);
 });
-check('channels enable, list and disable', () => {
+await check('channels enable, list and disable', () => {
   store.enableChannel('guild-1', 'chan-1', 'all', 'user-1');
   assert.equal(store.getChannel('guild-1', 'chan-1').mode, 'all');
   assert.equal(store.listChannels('guild-1').length, 1);
   assert.equal(store.disableChannel('guild-1', 'chan-1'), true);
   assert.equal(store.disableChannel('guild-1', 'chan-1'), false);
 });
-check('troll protection round-trips', () => {
+await check('troll protection round-trips', () => {
   store.setProtected('guild-1', 'user-9', true);
   assert.equal(store.isProtected('guild-1', 'user-9'), true);
   store.setProtected('guild-1', 'user-9', false);
   assert.equal(store.isProtected('guild-1', 'user-9'), false);
 });
-check('settings survive a write to disk', () => {
+await check('settings survive a write to disk', () => {
   store.updateSettings('guild-1', { chattiness: 42 });
   store.shutdown();
   const written = JSON.parse(fs.readFileSync(`${config.dataDir}/guilds.json`, 'utf8'));
@@ -224,7 +276,7 @@ check('settings survive a write to disk', () => {
 });
 
 console.log('\nmessage splitting');
-check('long replies split under the 2000 char cap', () => {
+await check('long replies split under the 2000 char cap', () => {
   assert.deepEqual(splitMessage('short'), ['short']);
 
   const long = 'word '.repeat(1200);
@@ -275,25 +327,25 @@ const filtered = await openaiProvider.speak({
 });
 server.close();
 
-check('sends a valid chat-completions request', () => {
+await check('sends a valid chat-completions request', () => {
   const request = seen[0];
   assert.match(request.url, /\/chat\/completions$/);
   assert.equal(request.auth, 'Bearer test-key');
   assert.equal(request.body.model, 'mock-model');
   assert.equal(request.body.max_tokens, config.maxTokens);
 });
-check('flattens the persona into a single system message', () => {
+await check('flattens the persona into a single system message', () => {
   const [system, turn] = seen[0].body.messages;
   assert.equal(system.role, 'system');
   assert.match(system.content, /You are Verity/);
   assert.match(system.content, /MOOD: FRIENDLY/);
   assert.equal(turn.content, '[dave]: hi', 'conversation turns pass through untouched');
 });
-check('reads the reply back out', () => {
+await check('reads the reply back out', () => {
   assert.equal(spoken.text, 'hello friend :D');
   assert.equal(spoken.refused, false);
 });
-check('a filtered response is reported as a refusal', () => {
+await check('a filtered response is reported as a refusal', () => {
   assert.equal(filtered.refused, true);
   assert.equal(filtered.text, '');
 });

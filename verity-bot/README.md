@@ -74,21 +74,28 @@ local Ollama — and Gemini's free tier is the most generous of them.
    VERITY_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
    ```
 
-5. Find a current model name and set it:
+5. Pick a model:
 
    ```bash
-   npm run models     # prints every model ID your key can actually use
+   VERITY_MODEL=gemini-3.6-flash
    ```
 
-   Pick a Flash one — they're the fast, free-tier-friendly models — and set
-   `VERITY_MODEL` to it. Gemini renames its model line often, which is why this asks the
-   API instead of trusting a name written here.
+   That one is verified working. If it ever stops, `npm run models` prints every ID your
+   key can currently use — Gemini renames its flash line every few months, and older names
+   get retired for new keys (`gemini-2.5-flash` already returns a 404 telling you to move
+   on). Pick another Flash model from that list.
 
 6. `npm start`. The startup line tells you which provider and model he came up on.
 
 Base URLs for the other services are listed in `.env.example`. Switching providers is
 never more than those three variables — the persona, moods, memory and commands don't
 care who is answering.
+
+**Give reasoning models room.** Gemini 3.x thinks before it writes, and those thinking
+tokens come out of `max_tokens`. That's why the OpenAI-compatible path defaults to 2000
+instead of Claude's 700 — at a few hundred, Verity gets truncated mid-word or returns
+nothing at all. Set `VERITY_REASONING_EFFORT=low` to make him think less and answer
+sooner; replies land in roughly 4–6 seconds either way.
 
 **Free tier realities.** Expect something like 10–15 requests per minute and a few
 hundred to ~1,500 per day, and expect those numbers to be cut without notice. One reply =
@@ -113,6 +120,7 @@ anywhere, but the voice itself is the model's job.
 | `/verity mood [mood]` | Manage Server | Force his mood in this channel, or check it. |
 | `/verity config [chattiness] [cooldown] [auto-escalate] [dms]` | Manage Server | Tuning knobs, below. |
 | `/verity settings` | Manage Server | Show the current configuration. |
+| `/verity quota [user] [reset]` | Manage Server | Check how many questions someone has used, or hand them back. |
 | `/verity forget` | Manage Server | Wipe his memory of this channel. |
 | `/verity protect <user> [protected]` | Manage Server | Exempt someone from `/troll` permanently. |
 | `/troll <user> [about] [intensity]` | Manage Messages | Points Verity at one person for a roast. `gentle`, `classic`, or `unhinged`. |
@@ -136,6 +144,8 @@ Manage Messages.
 | `cooldown` | `8` | Seconds between *unprompted* replies in one channel. Being pinged always gets an answer. |
 | `auto-escalate` | `true` | Whether his mood drifts on its own. Turn it off to pin him wherever `/verity mood` put him. |
 | `dms` | `true` | Whether he answers direct messages. |
+| `question-limit` | `10` | Answers each person gets per window. `0` removes the limit. |
+| `quota-hours` | `24` | How long that budget lasts before it refills. |
 
 ---
 
@@ -152,6 +162,13 @@ system prompt *and* how badly his text corrupts on the way out — `friendly` is
 one of his messages, or just say his name — "verity", "Verity!", "hey verity?" all reach
 him, matched on word boundaries so "severity" and "sincerity" don't. In an `all` channel he
 answers everything, subject to `chattiness` and `cooldown`.
+
+**Question budget.** Each person gets 10 answers per 24 hours by default — enough for
+normal use, low enough that one person can't drain a free API tier before lunch. Running
+out gets one in-character reply, then silence until it refills; he won't repeat himself
+every message. Budgets are per person per server, held in memory (a restart hands everyone
+a fresh 10), and `/verity config question-limit:0` turns the whole thing off.
+`/prophecy` is free and never counts, since it makes no API call.
 
 **Memory.** The last 14 messages per channel, in memory only. He hears everything said
 in the channels he lives in, whether or not he replies — which is what makes him able to
@@ -199,6 +216,7 @@ src/
   persona.js          the character, the mood briefs, the mood state machine
   glitch.js           text corruption, prophecies, faces
   memory.js           per-channel conversation state
+  quota.js            per-person question budgets
   store.js            per-guild settings, persisted to data/guilds.json
   split.js            2000-character message splitting
   addressed.js        the name trigger

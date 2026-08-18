@@ -16,7 +16,8 @@ const { listModels } = await import(
 try {
   const models = await listModels();
   console.log(`\n[verity] models available to you on "${config.provider}":\n`);
-  for (const model of models) console.log(`  ${model.id}`);
+  // Printed the way VERITY_MODEL wants them, not the way the API lists them.
+  for (const model of models) console.log(`  ${model.id.replace(/^models\//, '')}`);
   console.log(`\nPut one of these in VERITY_MODEL. Currently set to: ${config.model}\n`);
 } catch (error) {
   console.error('[verity] could not list models:', error.message);

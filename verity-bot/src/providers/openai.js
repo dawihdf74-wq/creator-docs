@@ -33,8 +33,10 @@ export async function speak({
     .join('\n\n');
 
   const completion = await getClient().chat.completions.create({
-    model: config.model,
+    // Gemini lists its models as "models/gemini-…" but wants the bare id here.
+    model: config.model.replace(/^models\//, ''),
     max_tokens: maxTokens,
+    ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
     messages: [{ role: 'system', content: system }, ...messages],
   });
 

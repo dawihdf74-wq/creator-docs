@@ -1,6 +1,8 @@
 import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
+import * as quota from '../quota.js';
+import { config } from '../config.js';
 import { nextMood } from '../persona.js';
 import { glitch } from '../glitch.js';
 import { inCharacterError, REFUSAL_LINE, speak } from '../ai.js';
@@ -23,16 +25,27 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction) {
   const question = interaction.options.getString('question');
+  const limits = interaction.guildId ? store.getSettings(interaction.guildId) : config.defaults;
+  const windowMs = limits.quotaHours * 60 * 60 * 1000;
+
+  const budget = quota.check(
+    interaction.guildId,
+    interaction.user.id,
+    limits.questionLimit,
+    windowMs,
+  );
+  if (!budget.allowed) {
+    return interaction.reply(
+      `that is all ${limits.questionLimit} of your questions, friend. you get more ${quota.resetTimestamp(budget.resetsAt)} :|`,
+    );
+  }
 
   // Always public: whatever he says, the channel sees it.
   await interaction.deferReply();
 
-  const settings = interaction.guildId
-    ? store.getSettings(interaction.guildId)
-    : { mood: 'friendly', autoEscalate: true };
-  const session = memory.getSession(interaction.channelId, settings.mood);
+  const session = memory.getSession(interaction.channelId, limits.mood);
 
-  if (settings.autoEscalate) {
+  if (limits.autoEscalate) {
     const { mood, reason } = nextMood(session.mood, question);
     if (reason) session.mood = mood;
   }
@@ -53,6 +66,7 @@ export async function execute(interaction) {
     memory.remember(interaction.channelId, 'user', turn.content);
     memory.remember(interaction.channelId, 'assistant', text);
     memory.markReplied(interaction.channelId);
+    quota.spend(interaction.guildId, interaction.user.id, limits.questionLimit, windowMs);
 
     return interaction.editReply(glitch(text, session.mood).slice(0, 2000));
   } catch (error) {

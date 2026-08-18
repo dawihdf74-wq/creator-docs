@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
+import * as quota from '../quota.js';
 import { MOODS } from '../persona.js';
 import { notice } from '../reply.js';
 
@@ -98,9 +99,32 @@ export const data = new SlashCommandBuilder()
       )
       .addBooleanOption((option) =>
         option.setName('dms').setDescription('Answer direct messages from members'),
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName('question-limit')
+          .setDescription('Answers each person gets per window (0 = unlimited)')
+          .setMinValue(0)
+          .setMaxValue(1000),
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName('quota-hours')
+          .setDescription('How long that budget lasts before it refills')
+          .setMinValue(1)
+          .setMaxValue(720),
       ),
   )
   .addSubcommand((sub) => sub.setName('settings').setDescription('Show the current settings'))
+  .addSubcommand((sub) =>
+    sub
+      .setName('quota')
+      .setDescription("Check or clear someone's question budget")
+      .addUserOption((option) => option.setName('user').setDescription('Whose budget to look at'))
+      .addBooleanOption((option) =>
+        option.setName('reset').setDescription('Give them their questions back'),
+      ),
+  )
   .addSubcommand((sub) =>
     sub.setName('forget').setDescription('Wipe what Verity remembers in this channel'),
   )
@@ -174,10 +198,14 @@ export async function execute(interaction) {
     const cooldown = interaction.options.getInteger('cooldown');
     const autoEscalate = interaction.options.getBoolean('auto-escalate');
     const dms = interaction.options.getBoolean('dms');
+    const questionLimit = interaction.options.getInteger('question-limit');
+    const quotaHours = interaction.options.getInteger('quota-hours');
     if (chattiness !== null) patch.chattiness = chattiness;
     if (cooldown !== null) patch.cooldown = cooldown;
     if (autoEscalate !== null) patch.autoEscalate = autoEscalate;
     if (dms !== null) patch.replyInDms = dms;
+    if (questionLimit !== null) patch.questionLimit = questionLimit;
+    if (quotaHours !== null) patch.quotaHours = quotaHours;
 
     if (!Object.keys(patch).length) {
       return interaction.reply(notice('Give me at least one thing to change. :|'));
@@ -204,6 +232,41 @@ export async function execute(interaction) {
     );
   }
 
+  if (sub === 'quota') {
+    const settings = store.getSettings(guildId);
+    const target = interaction.options.getUser('user');
+    const windowMs = settings.quotaHours * 60 * 60 * 1000;
+
+    if (interaction.options.getBoolean('reset')) {
+      if (target) {
+        quota.reset(guildId, target.id);
+        return interaction.reply(notice(`${target} has their questions back. Verity is thrilled.`));
+      }
+      const cleared = quota.reset(guildId);
+      return interaction.reply(
+        notice(
+          `Cleared ${cleared} question budget${cleared === 1 ? '' : 's'}. Everyone starts fresh.`,
+        ),
+      );
+    }
+
+    if (!settings.questionLimit) {
+      return interaction.reply(
+        notice('There is no question limit here. Ask him anything, forever.'),
+      );
+    }
+
+    const who = target ?? interaction.user;
+    const budget = quota.check(guildId, who.id, settings.questionLimit, windowMs);
+    return interaction.reply(
+      notice(
+        budget.used
+          ? `${who} has used **${budget.used}/${settings.questionLimit}** questions. Refills ${quota.resetTimestamp(budget.resetsAt)}.`
+          : `${who} has not asked him anything yet. He has noticed.`,
+      ),
+    );
+  }
+
   // protect
   const user = interaction.options.getUser('user');
   const wanted = interaction.options.getBoolean('protected') ?? true;
@@ -225,6 +288,7 @@ function describeSettings(settings, protectedIds = []) {
     `• Chattiness in "all" channels: \`${settings.chattiness}%\``,
     `• Cooldown between unprompted replies: \`${settings.cooldown}s\``,
     `• Answers DMs: \`${settings.replyInDms}\``,
+    `• Questions per person: ${settings.questionLimit ? `\`${settings.questionLimit}\` every \`${settings.quotaHours}h\`` : '`unlimited`'}`,
     `• Protected from /troll: ${protectedIds.length ? protectedIds.map((id) => `<@${id}>`).join(', ') : '_nobody_'}`,
   ].join('\n');
 }

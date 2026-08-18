@@ -2,6 +2,7 @@ import { ActivityType, Client, Events, GatewayIntentBits, Partials } from 'disco
 import { config } from './config.js';
 import * as store from './store.js';
 import * as memory from './memory.js';
+import * as quota from './quota.js';
 import { nextMood } from './persona.js';
 import { glitch } from './glitch.js';
 import { splitMessage } from './split.js';
@@ -30,6 +31,9 @@ const client = new Client({
 
 /** Channels with a reply already in flight, so we never stack API calls. */
 const busy = new Set();
+
+/** People already told they are out of questions, so he only says it once. */
+const warnedOfQuota = new Set();
 
 client.once(Events.ClientReady, (ready) => {
   console.log(`[verity] the package has been opened. logged in as ${ready.user.tag}`);
@@ -92,6 +96,24 @@ client.on(Events.MessageCreate, async (message) => {
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
   if (busy.has(message.channelId)) return;
 
+  const windowMs = settings.quotaHours * 60 * 60 * 1000;
+  const budget = quota.check(message.guildId, message.author.id, settings.questionLimit, windowMs);
+  if (!budget.allowed) {
+    // Say so once, then let them be — repeating it every message is worse
+    // than silence.
+    if (!warnedOfQuota.has(message.author.id)) {
+      warnedOfQuota.add(message.author.id);
+      setTimeout(() => warnedOfQuota.delete(message.author.id), 10 * 60 * 1000).unref();
+      await message
+        .reply({
+          content: `that is all ${settings.questionLimit} of your questions, friend. i have to save some of myself for the others. you get more ${quota.resetTimestamp(budget.resetsAt)} :|`,
+          allowedMentions: { repliedUser: false },
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
   busy.add(message.channelId);
   try {
     await message.channel.sendTyping();
@@ -106,6 +128,7 @@ client.on(Events.MessageCreate, async (message) => {
     const reply = refused || !text ? REFUSAL_LINE : glitch(text, session.mood);
     memory.remember(message.channelId, 'assistant', refused ? REFUSAL_LINE : text);
     memory.markReplied(message.channelId);
+    quota.spend(message.guildId, message.author.id, settings.questionLimit, windowMs);
 
     const chunks = splitMessage(reply);
     // Reply to the person who spoke to him; drift into the channel otherwise.

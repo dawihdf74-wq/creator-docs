@@ -29,9 +29,19 @@ export const config = {
     process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
     undefined,
-  maxTokens: Number(process.env.VERITY_MAX_TOKENS || 700),
+  // Reasoning models (Gemini 3.x and friends) spend this budget on internal
+  // thinking before they write a word, so the OpenAI-compatible path needs a
+  // far bigger ceiling than Claude does or replies come back truncated.
+  maxTokens: Number(
+    process.env.VERITY_MAX_TOKENS ||
+      ((process.env.VERITY_PROVIDER || 'claude').toLowerCase() === 'openai' ? 2000 : 700),
+  ),
   // Anthropic only; ignored by OpenAI-compatible providers.
   effort: process.env.VERITY_EFFORT || 'low',
+  // OpenAI-compatible only, and only sent when set: 'low' makes Gemini think
+  // less and answer sooner. Some providers reject the parameter outright,
+  // which is why it stays unset unless you ask for it.
+  reasoningEffort: process.env.VERITY_REASONING_EFFORT || undefined,
 
   // Behaviour
   // Command confirmations are visible to the whole channel unless this is off.
@@ -49,5 +59,8 @@ export const config = {
     // Seconds between unprompted replies in the same channel.
     cooldown: 8,
     replyInDms: true,
+    // Answered questions allowed per person per window. 0 disables the limit.
+    questionLimit: Number(process.env.VERITY_QUESTION_LIMIT || 10),
+    quotaHours: Number(process.env.VERITY_QUOTA_HOURS || 24),
   },
 };
