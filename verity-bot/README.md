@@ -49,8 +49,57 @@ instantly instead of taking up to an hour to propagate globally.
 
 ```bash
 npm test                # offline checks: no Discord connection, no API calls
+npm run models          # list model IDs your key can call
 npm run dev             # restart on file change
 ```
+
+---
+
+## Running him on Gemini's free tier
+
+Anthropic has no free tier. If you'd rather not pay, Verity speaks to any
+OpenAI-compatible endpoint — Google Gemini, Groq, OpenRouter, Cerebras, Mistral, or a
+local Ollama — and Gemini's free tier is the most generous of them.
+
+1. Sign in at **[aistudio.google.com/apikey](https://aistudio.google.com/apikey)** with a
+   normal Google account.
+2. Click **Create API key**, and let it create a new Google Cloud project (or pick an
+   existing one). No billing setup, no credit card.
+3. Copy the key immediately — the full value is only shown once.
+4. Put it in `.env`:
+
+   ```bash
+   VERITY_PROVIDER=openai
+   VERITY_API_KEY=your-gemini-key
+   VERITY_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+   ```
+
+5. Find a current model name and set it:
+
+   ```bash
+   npm run models     # prints every model ID your key can actually use
+   ```
+
+   Pick a Flash one — they're the fast, free-tier-friendly models — and set
+   `VERITY_MODEL` to it. Gemini renames its model line often, which is why this asks the
+   API instead of trusting a name written here.
+
+6. `npm start`. The startup line tells you which provider and model he came up on.
+
+Base URLs for the other services are listed in `.env.example`. Switching providers is
+never more than those three variables — the persona, moods, memory and commands don't
+care who is answering.
+
+**Free tier realities.** Expect something like 10–15 requests per minute and a few
+hundred to ~1,500 per day, and expect those numbers to be cut without notice. One reply =
+one request, so in an `all` channel at `chattiness: 100` a busy server drains the daily
+budget by evening — use `mention` mode, or drop chattiness to 15–25. Free tiers also
+generally log and train on what you send them, which is worth knowing before you point one
+at a private server. And smaller models play the character more flatly: the mood ladder,
+the glitch corruption and the guardrails are all in this repo's code, so they work
+anywhere, but the voice itself is the model's job.
+
+`VERITY_EFFORT` is Anthropic-only and is ignored on the OpenAI-compatible path.
 
 ---
 
@@ -143,7 +192,10 @@ Discord shows who invoked it. `/verity protect` makes anyone permanently off lim
 ```
 src/
   index.js            gateway client, message handling, reply decisions
-  claude.js           Anthropic SDK wrapper + in-character error handling
+  ai.js               provider facade + in-character error handling
+  providers/
+    anthropic.js      Claude via the Anthropic SDK
+    openai.js         Gemini / Groq / OpenRouter / Ollama / OpenAI
   persona.js          the character, the mood briefs, the mood state machine
   glitch.js           text corruption, prophecies, faces
   memory.js           per-channel conversation state
@@ -154,6 +206,7 @@ src/
   config.js           env loading and defaults
   commands/           verity.js, troll.js, ask.js, prophecy.js
   deploy-commands.js  slash command registration
+  list-models.js      `npm run models` — what your key can actually call
 test/dry-run.js       offline test suite
 ```
 

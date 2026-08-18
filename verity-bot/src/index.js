@@ -8,7 +8,7 @@ import { splitMessage } from './split.js';
 import { byName } from './commands/index.js';
 import { mentionsName } from './addressed.js';
 import { notice } from './reply.js';
-import { inCharacterError, REFUSAL_LINE, speak } from './claude.js';
+import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
 
 if (!process.env.ANTHROPIC_API_KEY) {
   // The SDK can also pick up an `ant auth login` profile, so this is a

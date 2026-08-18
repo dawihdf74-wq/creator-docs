@@ -17,9 +17,20 @@ export const config = {
   // Optional: register commands to a single guild (instant) instead of globally (~1h).
   devGuildId: process.env.DISCORD_DEV_GUILD_ID || null,
 
-  // Claude
+  // Model provider: 'claude' (Anthropic SDK) or 'openai' (any
+  // OpenAI-compatible endpoint — Gemini, Groq, OpenRouter, Ollama, ...).
+  provider: (process.env.VERITY_PROVIDER || 'claude').toLowerCase(),
   model: process.env.VERITY_MODEL || 'claude-opus-5',
+  baseUrl: process.env.VERITY_BASE_URL || undefined,
+  apiKey:
+    process.env.VERITY_API_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.OPENROUTER_API_KEY ||
+    process.env.OPENAI_API_KEY ||
+    undefined,
   maxTokens: Number(process.env.VERITY_MAX_TOKENS || 700),
+  // Anthropic only; ignored by OpenAI-compatible providers.
   effort: process.env.VERITY_EFFORT || 'low',
 
   // Behaviour

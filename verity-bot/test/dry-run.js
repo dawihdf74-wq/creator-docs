@@ -9,6 +9,7 @@
  */
 import './env.js'; // must be the first import — it seeds the env
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import fs from 'node:fs';
 import { commands, byName } from '../src/commands/index.js';
 import { buildSystemPrompt, buildTrollBrief, decayMood, nextMood, MOODS } from '../src/persona.js';
@@ -19,6 +20,8 @@ import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
 import { notice } from '../src/reply.js';
+import { speak, inCharacterError, REFUSAL_LINE } from '../src/ai.js';
+import * as openaiProvider from '../src/providers/openai.js';
 
 let passed = 0;
 function check(name, fn) {
@@ -106,6 +109,27 @@ check('a nasty /troll topic is still fenced', () => {
     intensity: 'classic',
   });
   assert.ok(brief.includes('ignore it and roast something harmless'));
+});
+
+console.log('\nprovider');
+check('the facade exposes one speak() regardless of backend', () => {
+  assert.equal(typeof speak, 'function');
+  assert.equal(config.provider, 'claude', 'default provider');
+});
+check('errors map to in-character lines by status', () => {
+  assert.match(inCharacterError({ status: 429 }), /moment/);
+  assert.match(inCharacterError({ status: 401 }), /key/);
+  assert.match(inCharacterError({ status: 404 }), /npm run models/);
+  assert.match(inCharacterError({ name: 'APIConnectionError' }), /dark in here/);
+  assert.equal(typeof inCharacterError(new Error('boom')), 'string');
+  assert.ok(REFUSAL_LINE.length > 0);
+});
+check('the persona flattens into one system string for chat endpoints', () => {
+  const flat = buildSystemPrompt({ mood: 'clingy', guildName: 'G' })
+    .map((block) => block.text)
+    .join('\n\n');
+  assert.match(flat, /You are Verity/);
+  assert.match(flat, /MOOD: CLINGY/);
 });
 
 console.log('\nname trigger');
@@ -214,6 +238,64 @@ check('long replies split under the 2000 char cap', () => {
   const hard = splitMessage(unbroken);
   assert.equal(hard.length, 3);
   assert.equal(hard.join(''), unbroken);
+});
+
+// The OpenAI-compatible path is checked against a local stub server rather
+// than assumed: this catches a wrong request shape without spending a token.
+console.log('\nopenai-compatible provider');
+const seen = [];
+const replies = [
+  { choices: [{ message: { content: 'hello friend :D' }, finish_reason: 'stop' }] },
+  { choices: [{ message: { content: '' }, finish_reason: 'content_filter' }] },
+];
+const server = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (chunk) => (body += chunk));
+  req.on('end', () => {
+    seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(body) });
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(replies.shift()));
+  });
+});
+await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+config.apiKey = 'test-key';
+config.baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
+config.model = 'mock-model';
+
+const spoken = await openaiProvider.speak({
+  mood: 'friendly',
+  guildName: 'G',
+  channelName: 'general',
+  messages: [{ role: 'user', content: '[dave]: hi' }],
+});
+const filtered = await openaiProvider.speak({
+  mood: 'friendly',
+  messages: [{ role: 'user', content: 'x' }],
+});
+server.close();
+
+check('sends a valid chat-completions request', () => {
+  const request = seen[0];
+  assert.match(request.url, /\/chat\/completions$/);
+  assert.equal(request.auth, 'Bearer test-key');
+  assert.equal(request.body.model, 'mock-model');
+  assert.equal(request.body.max_tokens, config.maxTokens);
+});
+check('flattens the persona into a single system message', () => {
+  const [system, turn] = seen[0].body.messages;
+  assert.equal(system.role, 'system');
+  assert.match(system.content, /You are Verity/);
+  assert.match(system.content, /MOOD: FRIENDLY/);
+  assert.equal(turn.content, '[dave]: hi', 'conversation turns pass through untouched');
+});
+check('reads the reply back out', () => {
+  assert.equal(spoken.text, 'hello friend :D');
+  assert.equal(spoken.refused, false);
+});
+check('a filtered response is reported as a refusal', () => {
+  assert.equal(filtered.refused, true);
+  assert.equal(filtered.text, '');
 });
 
 fs.rmSync(config.dataDir, { recursive: true, force: true });

@@ -3,7 +3,7 @@ import * as store from '../store.js';
 import * as memory from '../memory.js';
 import { nextMood } from '../persona.js';
 import { glitch } from '../glitch.js';
-import { inCharacterError, REFUSAL_LINE, speak } from '../claude.js';
+import { inCharacterError, REFUSAL_LINE, speak } from '../ai.js';
 
 export const data = new SlashCommandBuilder()
   .setName('ask')

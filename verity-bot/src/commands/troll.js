@@ -4,7 +4,7 @@ import * as memory from '../memory.js';
 import { buildTrollBrief, MOODS } from '../persona.js';
 import { glitch } from '../glitch.js';
 import { notice } from '../reply.js';
-import { inCharacterError, REFUSAL_LINE, speak } from '../claude.js';
+import { inCharacterError, REFUSAL_LINE, speak } from '../ai.js';
 
 /** Minimum mood the roast is delivered in, per intensity. */
 const MOOD_FLOOR = { gentle: 'friendly', classic: 'clingy', unhinged: 'unhinged' };

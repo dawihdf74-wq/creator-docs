@@ -12,12 +12,14 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "test": "node test/dry-run.js"
+    "test": "node test/dry-run.js",
+    "models": "node src/list-models.js"
   },
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
     "discord.js": "^14.27.0",
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "openai": "^7.5.0"
   }
 }
