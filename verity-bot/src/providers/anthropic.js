@@ -6,7 +6,7 @@ import { buildSystemPrompt } from '../persona.js';
 // Resolves them from the environment (ANTHROPIC_API_KEY, or an `ant auth
 // login` profile). Never hardcode a key here.
 let client;
-const getClient = () => (client ??= new Anthropic({ maxRetries: 2, timeout: 60_000 }));
+const getClient = () => (client ??= new Anthropic({ maxRetries: 2, timeout: config.timeoutMs }));
 
 /**
  * Ask Verity for a line.

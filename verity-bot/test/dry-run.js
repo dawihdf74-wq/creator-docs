@@ -22,6 +22,7 @@ import * as throttle from '../src/throttle.js';
 import * as modelChain from '../src/models.js';
 import { shouldSay, forget as forgetSaid } from '../src/announce.js';
 import { GREETING } from '../src/persona.js';
+import { looksLikeQuestion } from '../src/question.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -174,6 +175,51 @@ await check('rudeness is in the persona, limits still above it', () => {
   assert.match(base, /Never threaten a real person/);
   assert.match(base, /No slurs/);
   assert.match(base, /genuinely distressed/);
+});
+
+console.log('\nquestions-only mode');
+await check('recognises a question', () => {
+  for (const line of [
+    'verity how do i get diamonds',
+    'whats the best sword',
+    'can you help',
+    'is netherite better?',
+    '<@123> why is my farm broken',
+    'anyone know how redstone repeaters work',
+  ]) {
+    assert.ok(looksLikeQuestion(line), `should count as a question: ${line}`);
+  }
+});
+await check('leaves ordinary chatter alone', () => {
+  for (const line of ['hi', 'lol', 'verity you are stupid', 'im going to bed', '', null]) {
+    assert.ok(!looksLikeQuestion(line), `should not count as a question: ${line}`);
+  }
+});
+await check('it is off unless asked for', () => {
+  assert.equal(config.defaults.questionsOnly, false);
+});
+
+console.log('\nlocal model mode');
+await check('a localhost endpoint relaxes the API-shaped limits', async () => {
+  // Fresh module instance: ESM caches by URL, so the query string re-reads env.
+  process.env.VERITY_BASE_URL = 'http://localhost:11434/v1';
+  process.env.VERITY_PROVIDER = 'openai';
+  const local = (await import('../src/config.js?local=1')).config;
+  delete process.env.VERITY_BASE_URL;
+
+  assert.equal(local.isLocal, true, 'detected as local');
+  assert.equal(local.apiKey, 'local', 'no key needed, but the SDK gets one');
+  assert.equal(local.maxRpm, Infinity, 'no per-minute cap on your own machine');
+  assert.ok(local.timeoutMs >= 300_000, 'patient enough for a laptop CPU');
+});
+await check('a remote endpoint keeps them', async () => {
+  process.env.VERITY_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+  const remote = (await import('../src/config.js?remote=1')).config;
+  delete process.env.VERITY_BASE_URL;
+
+  assert.equal(remote.isLocal, false);
+  assert.equal(remote.maxRpm, 8);
+  assert.equal(remote.timeoutMs, 60_000);
 });
 
 console.log('\nname trigger');

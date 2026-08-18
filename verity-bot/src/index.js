@@ -10,6 +10,7 @@ import { glitch } from './glitch.js';
 import { splitMessage } from './split.js';
 import { byName } from './commands/index.js';
 import { mentionsName } from './addressed.js';
+import { looksLikeQuestion } from './question.js';
 import { isOwner } from './owners.js';
 import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
@@ -28,7 +29,9 @@ if (config.provider === 'claude' && !process.env.ANTHROPIC_API_KEY) {
   );
 }
 
-console.log(`[verity] provider: ${config.provider} · models: ${config.models.join(' → ')}`);
+console.log(
+  `[verity] provider: ${config.provider}${config.isLocal ? ' (local)' : ''} · models: ${config.models.join(' → ')}`,
+);
 console.log(
   config.owners.length
     ? `[verity] slash commands restricted to: ${config.owners.join(', ')}`
@@ -149,6 +152,11 @@ client.on(Events.MessageCreate, async (message) => {
   }
 
   const addressed = isDm || (await isAddressed(message));
+
+  // Questions-only: he answers what he is asked and stays out of everything
+  // else. Worth having when every reply costs a request or a lot of laptop.
+  if (settings.questionsOnly && !looksLikeQuestion(message.content)) return;
+
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
   if (busy.has(message.channelId)) return;
 

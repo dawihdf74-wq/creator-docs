@@ -60,6 +60,42 @@ npm run dev             # restart on file change
 
 ---
 
+## Running him on your own machine (no keys, no quotas)
+
+```bash
+npm run local
+```
+
+That looks at what your computer has, picks a model it can actually run, downloads it
+through [Ollama](https://ollama.com/download), writes the `.env` lines, and makes Verity
+say something to prove it worked. Install Ollama first — the command tells you where to
+get it if it isn't there.
+
+Nothing is metered after that: no API key, no daily cap, no rate limit, and nothing you
+type leaves your computer. The costs are the honest ones — **the machine has to be awake
+for Verity to be alive**, replies take longer (a few seconds on a gaming GPU, 10–25 on a
+laptop CPU), and a model small enough to run at home is meaningfully dumber than Gemini
+about Minecraft. The personality survives that much better than the facts do.
+
+Model choice by machine, which `npm run local` picks for you:
+
+| What you have | What it runs | Feel |
+| --- | --- | --- |
+| 12 GB+ VRAM | `qwen3:8b` | Fast, holds the character properly |
+| 8 GB+ VRAM, or Apple Silicon | `qwen3:4b` | Quick, convincingly rude |
+| 16 GB RAM, no GPU | `qwen3:4b` on the CPU | 10–25s a reply |
+| 8 GB RAM | `qwen3:1.7b` | Dim, but alive |
+
+If a tag has been renamed it tries the next one down the list rather than giving up.
+`VERITY_MODEL` accepts any tag from [ollama.com/library](https://ollama.com/library).
+
+**Answer questions only.** Especially useful locally, where every reply costs real
+seconds: `/verity config questions-only:true` makes him reply only to messages that are
+actually asking something — a question mark, or an opener like *how / why / can / does*.
+Everything else he ignores completely.
+
+---
+
 ## Running him on Gemini's free tier
 
 Anthropic has no free tier. If you'd rather not pay, Verity speaks to any
@@ -179,6 +215,7 @@ Manage Messages.
 | `cooldown` | `8` | Seconds between *unprompted* replies in one channel. Being pinged always gets an answer. |
 | `auto-escalate` | `true` | Whether his mood drifts on its own. Turn it off to pin him wherever `/verity mood` put him. |
 | `dms` | `true` | Whether he answers direct messages. |
+| `questions-only` | `false` | Only reply to messages that are actually asking him something. |
 | `question-limit` | `10` | Answers each person gets per window. `0` removes the limit. |
 | `quota-hours` | `24` | How long that budget lasts before it refills. |
 
@@ -255,6 +292,9 @@ src/
   glitch.js           text corruption, prophecies, faces
   memory.js           per-channel conversation state
   quota.js            per-person question budgets
+  models.js           the fallback chain and per-model budgets
+  question.js         is this message actually asking him something
+  setup-local.js      `npm run local` — set him up on a model on this machine
   throttle.js         per-minute cap + backoff when the provider says no
   announce.js         says a thing once, not after every message
   store.js            per-guild settings, persisted to data/guilds.json

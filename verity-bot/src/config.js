@@ -10,7 +10,14 @@ function required(name) {
   return value;
 }
 
+const baseUrl = process.env.VERITY_BASE_URL || undefined;
+/** A model running on this machine: no key, no quota, and much slower. */
+const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:|\/|$)/i.test(
+  baseUrl ?? '',
+);
+
 export const config = {
+  isLocal,
   // Discord
   token: required('DISCORD_TOKEN'),
   clientId: required('DISCORD_CLIENT_ID'),
@@ -41,20 +48,23 @@ export const config = {
   get model() {
     return this.models[0];
   },
-  baseUrl: process.env.VERITY_BASE_URL || undefined,
+  baseUrl,
   apiKey:
     process.env.VERITY_API_KEY ||
     process.env.GEMINI_API_KEY ||
     process.env.GROQ_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
-    undefined,
+    // Local runtimes ignore the key, but the SDK insists on one.
+    (isLocal ? 'local' : undefined),
   // Reasoning models (Gemini 3.x and friends) spend this budget on internal
   // thinking before they write a word, so the OpenAI-compatible path needs a
   // far bigger ceiling than Claude does or replies come back truncated.
   // Hard ceiling on model calls per minute across the whole bot. Free tiers
   // sit around 10-15 RPM, so this stays just under.
-  maxRpm: Number(process.env.VERITY_MAX_RPM || 8),
+  maxRpm: Number(process.env.VERITY_MAX_RPM || (isLocal ? Infinity : 8)),
+  // A laptop generating tokens on its own CPU is far slower than an API.
+  timeoutMs: Number(process.env.VERITY_TIMEOUT_MS || (isLocal ? 300_000 : 60_000)),
   maxTokens: Number(
     process.env.VERITY_MAX_TOKENS ||
       ((process.env.VERITY_PROVIDER || 'claude').toLowerCase() === 'openai' ? 2000 : 700),
@@ -82,6 +92,8 @@ export const config = {
     // Seconds between unprompted replies in the same channel.
     cooldown: 8,
     replyInDms: true,
+    // Only answer messages that are actually asking him something.
+    questionsOnly: process.env.VERITY_QUESTIONS_ONLY === 'true',
     // Answered questions allowed per person per window. 0 disables the limit.
     questionLimit: Number(process.env.VERITY_QUESTION_LIMIT || 10),
     quotaHours: Number(process.env.VERITY_QUOTA_HOURS || 24),

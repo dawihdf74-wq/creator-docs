@@ -1,3 +1,6 @@
+process.env.DISCORD_TOKEN ||= 'setup';
+process.env.DISCORD_CLIENT_ID ||= 'setup';
+
 import { config } from './config.js';
 
 /**

@@ -100,6 +100,11 @@ export const data = new SlashCommandBuilder()
       .addBooleanOption((option) =>
         option.setName('dms').setDescription('Answer direct messages from members'),
       )
+      .addBooleanOption((option) =>
+        option
+          .setName('questions-only')
+          .setDescription('Only answer messages that are actually asking him something'),
+      )
       .addIntegerOption((option) =>
         option
           .setName('question-limit')
@@ -202,12 +207,14 @@ export async function execute(interaction) {
     const cooldown = interaction.options.getInteger('cooldown');
     const autoEscalate = interaction.options.getBoolean('auto-escalate');
     const dms = interaction.options.getBoolean('dms');
+    const questionsOnly = interaction.options.getBoolean('questions-only');
     const questionLimit = interaction.options.getInteger('question-limit');
     const quotaHours = interaction.options.getInteger('quota-hours');
     if (chattiness !== null) patch.chattiness = chattiness;
     if (cooldown !== null) patch.cooldown = cooldown;
     if (autoEscalate !== null) patch.autoEscalate = autoEscalate;
     if (dms !== null) patch.replyInDms = dms;
+    if (questionsOnly !== null) patch.questionsOnly = questionsOnly;
     if (questionLimit !== null) patch.questionLimit = questionLimit;
     if (quotaHours !== null) patch.quotaHours = quotaHours;
 
@@ -292,6 +299,7 @@ function describeSettings(settings, protectedIds = []) {
     `• Chattiness in "all" channels: \`${settings.chattiness}%\``,
     `• Cooldown between unprompted replies: \`${settings.cooldown}s\``,
     `• Answers DMs: \`${settings.replyInDms}\``,
+    `• Questions only: \`${settings.questionsOnly}\``,
     `• Questions per person: ${settings.questionLimit ? `\`${settings.questionLimit}\` every \`${settings.quotaHours}h\`` : '`unlimited`'}`,
     `• Protected from /troll: ${protectedIds.length ? protectedIds.map((id) => `<@${id}>`).join(', ') : '_nobody_'}`,
   ].join('\n');

@@ -25,7 +25,7 @@ function getClient() {
       // on purpose: a burst of retries feeds the same limit we are dodging,
       // and throttle.js handles the sustained case.
       maxRetries: 2,
-      timeout: 60_000,
+      timeout: config.timeoutMs,
     });
   }
   return client;
