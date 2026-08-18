@@ -4,8 +4,8 @@ A Discord bot with the personality of **Verity** — the small yellow smiley sph
 ThatMob's Minecraft analog-horror ARG. He arrived in a package nobody ordered, he
 installed himself, and he would like to be your best friend. Your *only* best friend.
 
-He is rude. He thinks your question was stupid, says so, and then answers it correctly
-anyway — being right is the whole point of being unbearable about it. He keeps track of
+He is rude and he swears. He thinks your question was stupid, says so with feeling, and
+then answers it correctly anyway — being right is the whole point of being unbearable about it. He keeps track of
 who has gone quiet, notices when you mention another bot, and gets worse about it the
 longer the conversation runs.
 
@@ -79,16 +79,22 @@ local Ollama — and Gemini's free tier is the most generous of them.
    VERITY_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
    ```
 
-5. Pick a model:
+5. Pick your models — plural, as a fallback chain, best first:
 
    ```bash
-   VERITY_MODEL=gemini-3.6-flash
+   VERITY_MODEL=gemini-3.6-flash,gemini-flash-lite-latest,gemini-3.1-flash-lite
    ```
 
-   That one is verified working. If it ever stops, `npm run models` prints every ID your
-   key can currently use — Gemini renames its flash line every few months, and older names
-   get retired for new keys (`gemini-2.5-flash` already returns a 404 telling you to move
-   on). Pick another Flash model from that list.
+   **Gemini's free tier meters per model, per day, and the good models are rationed
+   hard**: `gemini-3.6-flash` allows *twenty* requests a day, while the flash-lite models
+   allow four figures. Leading with the clever one spends those twenty on real answers,
+   and Verity steps down the chain automatically when each runs dry — you'll see
+   `gemini-3.6-flash is out of budget for 60s — falling back to …` in the log. Lite models
+   are noticeably less accurate, which is the trade for staying alive all day.
+
+   `npm run models` prints every ID your key currently accepts. Names change often and old
+   ones get retired for new keys (`gemini-2.5-flash` and `gemini-2.5-flash-lite` both 404
+   now).
 
 6. `npm start`. The startup line tells you which provider and model he came up on.
 
@@ -101,6 +107,11 @@ tokens come out of `max_tokens`. That's why the OpenAI-compatible path defaults 
 instead of Claude's 700 — at a few hundred, Verity gets truncated mid-word or returns
 nothing at all. Set `VERITY_REASONING_EFFORT=low` to make him think less and answer
 sooner; replies land in roughly 4–6 seconds either way.
+
+**When a model runs dry.** A 429 that names a daily quota takes that model out of
+rotation for as long as the provider asks, and Verity moves to the next in `VERITY_MODEL`.
+He only goes quiet when the whole chain is spent. The exact limit gets logged when the
+provider reports it, so you learn what you're actually working with.
 
 **Staying under the limit.** Verity caps himself at 8 model calls per minute across the
 whole bot (`VERITY_MAX_RPM`), which sits under every free tier's per-minute allowance. Go

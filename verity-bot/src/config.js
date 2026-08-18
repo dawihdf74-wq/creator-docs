@@ -32,7 +32,15 @@ export const config = {
   // Model provider: 'claude' (Anthropic SDK) or 'openai' (any
   // OpenAI-compatible endpoint — Gemini, Groq, OpenRouter, Ollama, ...).
   provider: (process.env.VERITY_PROVIDER || 'claude').toLowerCase(),
-  model: process.env.VERITY_MODEL || 'claude-opus-5',
+  // A comma-separated fallback chain, best first. Free tiers meter per model,
+  // so when the first one runs out of daily budget Verity steps to the next.
+  models: (process.env.VERITY_MODEL || 'claude-opus-5')
+    .split(',')
+    .map((entry) => entry.trim().replace(/^models\//, ''))
+    .filter(Boolean),
+  get model() {
+    return this.models[0];
+  },
   baseUrl: process.env.VERITY_BASE_URL || undefined,
   apiKey:
     process.env.VERITY_API_KEY ||

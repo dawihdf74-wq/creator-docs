@@ -27,11 +27,12 @@ export async function speak({
   guildName,
   channelName,
   extra,
+  model = config.model,
   effort = config.effort,
   maxTokens = config.maxTokens,
 }) {
   const response = await getClient().messages.create({
-    model: config.model,
+    model,
     max_tokens: maxTokens,
     system: buildSystemPrompt({ mood, guildName, channelName, extra }),
     output_config: { effort },

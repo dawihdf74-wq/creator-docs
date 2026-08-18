@@ -14,12 +14,53 @@ import { isOwner } from './owners.js';
 import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  // The SDK can also pick up an `ant auth login` profile, so this is a
+if (config.provider === 'openai' && !config.apiKey) {
+  console.error(
+    '[verity] VERITY_PROVIDER=openai but no API key is set. Put your key in VERITY_API_KEY.',
+  );
+  process.exit(1);
+}
+if (config.provider === 'claude' && !process.env.ANTHROPIC_API_KEY) {
+  // The SDK can also pick up an `ant auth login` profile, so this one is a
   // warning rather than a hard stop.
   console.warn(
-    '[verity] ANTHROPIC_API_KEY is not set — Verity will only be able to speak if the SDK finds credentials elsewhere.',
+    '[verity] ANTHROPIC_API_KEY is not set — Verity can only speak if the SDK finds credentials elsewhere.',
   );
+}
+
+console.log(`[verity] provider: ${config.provider} · models: ${config.models.join(' → ')}`);
+console.log(
+  config.owners.length
+    ? `[verity] slash commands restricted to: ${config.owners.join(', ')}`
+    : '[verity] slash commands are open to everyone (VERITY_OWNERS is empty)',
+);
+
+/**
+ * Credentials are checked once at boot. Without this a bad key looks like a
+ * healthy bot that fails every single message, which is a miserable way to
+ * find out.
+ */
+try {
+  const { listModels } = await import(
+    config.provider === 'openai' ? './providers/openai.js' : './providers/anthropic.js'
+  );
+  const known = new Set((await listModels()).map((entry) => entry.id.replace(/^models\//, '')));
+  console.log('[verity] model credentials look good.');
+
+  const missing = config.models.filter((model) => !known.has(model));
+  if (missing.length) {
+    console.warn(`[verity] these models are not in your provider's list: ${missing.join(', ')}`);
+    console.warn('[verity] Run `npm run models` to see what your key can actually call.');
+  }
+} catch (error) {
+  if (error?.status === 401 || error?.status === 403) {
+    console.error(
+      `[verity] the model API rejected your key (${error.status}). Verity cannot speak.`,
+    );
+    console.error('[verity] Check VERITY_API_KEY / ANTHROPIC_API_KEY in .env.');
+    process.exit(1);
+  }
+  console.warn('[verity] could not verify model credentials:', error?.message ?? error);
 }
 
 const client = new Client({

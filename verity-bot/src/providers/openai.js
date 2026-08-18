@@ -8,11 +8,16 @@ import { buildSystemPrompt } from '../persona.js';
  * itself. Set VERITY_BASE_URL, VERITY_API_KEY and VERITY_MODEL to pick one.
  */
 let client;
+let clientKey;
 function getClient() {
-  if (!client) {
+  // Keyed on the endpoint it was built for, so pointing Verity somewhere else
+  // gives you a client for that somewhere else.
+  const key = `${config.baseUrl ?? ''}|${config.apiKey ?? ''}`;
+  if (!client || clientKey !== key) {
     if (!config.apiKey) {
       throw new Error('VERITY_API_KEY is not set — Verity has no way to reach the model.');
     }
+    clientKey = key;
     client = new OpenAI({
       apiKey: config.apiKey,
       baseURL: config.baseUrl,
@@ -32,6 +37,7 @@ export async function speak({
   guildName,
   channelName,
   extra,
+  model = config.model,
   maxTokens = config.maxTokens,
 }) {
   // These endpoints take one plain system string, so the cached-prefix split
@@ -42,7 +48,7 @@ export async function speak({
 
   const completion = await getClient().chat.completions.create({
     // Gemini lists its models as "models/gemini-…" but wants the bare id here.
-    model: config.model.replace(/^models\//, ''),
+    model: model.replace(/^models\//, ''),
     max_tokens: maxTokens,
     ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
     messages: [{ role: 'system', content: system }, ...messages],

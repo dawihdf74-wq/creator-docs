@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import * as throttle from './throttle.js';
+import * as models from './models.js';
 import * as anthropic from './providers/anthropic.js';
 import * as openaiCompatible from './providers/openai.js';
 
@@ -8,17 +9,36 @@ import * as openaiCompatible from './providers/openai.js';
  * file — persona, moods, memory, commands — is provider-agnostic; this is
  * the only place that knows which API is answering.
  */
-const provider = config.provider === 'openai' ? openaiCompatible : anthropic;
+const provider = () => (config.provider === 'openai' ? openaiCompatible : anthropic);
 
 export async function speak(options) {
-  try {
-    const result = await provider.speak(options);
-    throttle.succeeded();
-    return result;
-  } catch (error) {
-    if (error?.status === 429) throttle.rateLimited(error);
-    throw error;
+  // Try each model that still has budget, best first. Only when every one of
+  // them is spent does Verity actually go quiet.
+  const chain = models.available();
+  let lastError;
+
+  for (const model of chain.length ? chain : [models.all()[0]]) {
+    try {
+      const result = await provider().speak({ ...options, model });
+      throttle.succeeded();
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (error?.status !== 429) throw error;
+
+      const { retrySeconds, limit, perDay } = models.readQuotaError(error);
+      if (limit && perDay) {
+        console.warn(
+          `[verity] ${model}: the free tier allows ${limit} requests a day and today's are gone.`,
+        );
+      }
+      models.penalise(model, retrySeconds);
+    }
   }
+
+  // Everything is spent — back the whole bot off, not just one model.
+  throttle.rateLimited(lastError);
+  throw lastError;
 }
 
 /**

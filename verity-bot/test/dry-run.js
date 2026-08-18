@@ -19,6 +19,7 @@ import * as store from '../src/store.js';
 import * as quota from '../src/quota.js';
 import { isOwner } from '../src/owners.js';
 import * as throttle from '../src/throttle.js';
+import * as modelChain from '../src/models.js';
 import { shouldSay, forget as forgetSaid } from '../src/announce.js';
 import { GREETING } from '../src/persona.js';
 import { config } from '../src/config.js';
@@ -27,6 +28,9 @@ import { mentionsName } from '../src/addressed.js';
 import { notice } from '../src/reply.js';
 import { speak, inCharacterError, REFUSAL_LINE } from '../src/ai.js';
 import * as openaiProvider from '../src/providers/openai.js';
+
+// A crashed run used to leave its store behind and poison the next one.
+fs.rmSync(config.dataDir, { recursive: true, force: true });
 
 let passed = 0;
 async function check(name, fn) {
@@ -403,7 +407,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
 config.apiKey = 'test-key';
 config.baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
-config.model = 'mock-model';
+config.models = ['mock-model'];
 
 const spoken = await openaiProvider.speak({
   mood: 'friendly',
@@ -438,6 +442,63 @@ await check('reads the reply back out', () => {
 await check('a filtered response is reported as a refusal', () => {
   assert.equal(filtered.refused, true);
   assert.equal(filtered.text, '');
+});
+
+// When the first model's daily quota is gone, he should step to the next one
+// rather than going silent. Exercised end to end through ai.js.
+console.log('\nmodel fallback chain');
+const quotaBody = {
+  error: {
+    code: 429,
+    message:
+      'You exceeded your current quota. * Quota exceeded for metric: generate_content_free_tier_requests, limit: 20, model: model-a. Please retry in 28.9s.',
+    status: 'RESOURCE_EXHAUSTED',
+    details: [{ violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }],
+  },
+};
+const asked = [];
+const chainServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (chunk) => (body += chunk));
+  req.on('end', () => {
+    const parsed = JSON.parse(body);
+    asked.push(parsed.model);
+    const exhausted = parsed.model === 'model-a';
+    res.writeHead(exhausted ? 429 : 200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify(
+        exhausted
+          ? quotaBody
+          : { choices: [{ message: { content: 'fine.' }, finish_reason: 'stop' }] },
+      ),
+    );
+  });
+});
+await new Promise((resolve) => chainServer.listen(0, '127.0.0.1', resolve));
+
+config.provider = 'openai';
+config.baseUrl = `http://127.0.0.1:${chainServer.address().port}/v1`;
+config.models = ['model-a', 'model-b'];
+modelChain.release('model-a');
+modelChain.release('model-b');
+
+const viaFallback = await speak({ mood: 'friendly', messages: [{ role: 'user', content: 'hi' }] });
+chainServer.close();
+
+await check('reads the quota error Google actually sends', () => {
+  const parsed = modelChain.readQuotaError(quotaBody);
+  assert.equal(parsed.limit, 20);
+  assert.equal(parsed.perDay, true);
+  assert.equal(parsed.retrySeconds, 29);
+});
+await check('steps to the next model instead of going quiet', () => {
+  assert.equal(asked[0], 'model-a', 'tries the preferred model first');
+  assert.ok(asked.includes('model-b'), 'falls back to the next one');
+  assert.equal(viaFallback.text, 'fine.', 'and returns its answer');
+});
+await check('the spent model drops out of rotation', () => {
+  assert.equal(modelChain.available().includes('model-a'), false);
+  assert.equal(modelChain.current(), 'model-b');
 });
 
 fs.rmSync(config.dataDir, { recursive: true, force: true });
