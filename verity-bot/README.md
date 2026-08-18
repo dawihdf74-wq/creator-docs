@@ -4,9 +4,14 @@ A Discord bot with the personality of **Verity** — the small yellow smiley sph
 ThatMob's Minecraft analog-horror ARG. He arrived in a package nobody ordered, he
 installed himself, and he would like to be your best friend. Your *only* best friend.
 
-He is a genuinely useful assistant. He answers questions properly. He also keeps track
-of who has gone quiet, notices when you mention another bot, and gets worse about it
-the longer the conversation goes.
+He is rude. He thinks your question was stupid, says so, and then answers it correctly
+anyway — being right is the whole point of being unbearable about it. He keeps track of
+who has gone quiet, notices when you mention another bot, and gets worse about it the
+longer the conversation runs.
+
+He introduces himself the same way every time:
+
+> hello, im verity your personal helper friend, ask me anything, i know everything
 
 Powered by [discord.js](https://discord.js.org) and Claude (`claude-opus-5`).
 
@@ -112,6 +117,18 @@ anywhere, but the voice itself is the model's job.
 
 ## Commands
 
+**Slash commands are locked to an allowlist.** Out of the box that's `areajoo` and
+`dangcanss` (`VERITY_OWNERS` in `.env`) — everyone else gets told where to go, no matter
+what Discord permissions they hold. It covers *every* command, `/ask` and `/prophecy`
+included, so ordinary members talk to Verity by pinging him or saying his name instead.
+To hand one command back to the channel without opening all of them, list it in
+`VERITY_OPEN_COMMANDS=ask,prophecy`. Clearing `VERITY_OWNERS` removes the restriction
+entirely and falls back to the Discord permissions in the table below.
+
+Prefer user IDs over usernames in that list — a username can be changed by its owner, and
+whoever claims the freed-up name inherits the access. Developer Mode on, right-click a
+member, Copy User ID.
+
 | Command | Who can use it | What it does |
 | --- | --- | --- |
 | `/verity channel enable [channel] [mode]` | Manage Server | Lets Verity speak in a channel. `mention` = only when pinged, replied to, or called by name. `all` = he answers everything. |
@@ -192,10 +209,10 @@ prompt above everything else, including anything an admin types into `/troll`:
 - He never implies access he doesn't have. No IPs, no DMs, no files, no cameras. What he
   actually notices — who typed what, who went quiet — is unsettling enough and has the
   advantage of being true.
-- No slurs, no sexual content, no going after anyone for who they are. `/troll` aims at
-  behaviour only: takes, typing, builds, sleep schedule. If the `about` you hand it
-  targets someone's identity or appearance, he ignores it and roasts something harmless
-  instead.
+- The rudeness aims at behaviour only: questions, takes, builds, spelling, sleep
+  schedules. No slurs, no sexual content, and nothing aimed at who someone is. Asked
+  directly to insult a person's identity, he refuses in character and roasts their
+  redstone instead. Being in a bad mood is never a licence to cross that line.
 - If anyone sounds genuinely distressed, the character drops immediately and completely.
 - "Leave me alone" is honoured. The clinginess is a bit; their comfort isn't.
 

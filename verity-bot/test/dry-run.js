@@ -17,6 +17,8 @@ import { glitch, randomProphecy, PROPHECIES } from '../src/glitch.js';
 import * as memory from '../src/memory.js';
 import * as store from '../src/store.js';
 import * as quota from '../src/quota.js';
+import { isOwner } from '../src/owners.js';
+import { GREETING } from '../src/persona.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -133,6 +135,39 @@ await check('the persona flattens into one system string for chat endpoints', ()
     .join('\n\n');
   assert.match(flat, /You are Verity/);
   assert.match(flat, /MOOD: CLINGY/);
+});
+
+console.log('\nslash command allowlist');
+await check('only the listed people get in', () => {
+  assert.deepEqual(config.owners, ['areajoo', 'dangcanss'], 'shipped allowlist');
+  assert.equal(isOwner({ id: '1', username: 'areajoo' }, config.owners), true);
+  assert.equal(isOwner({ id: '2', username: 'dangcanss' }, config.owners), true);
+  assert.equal(isOwner({ id: '3', username: 'steve' }, config.owners), false);
+});
+await check('matching ignores case, @ and display name', () => {
+  assert.equal(isOwner({ id: '1', username: 'AreaJoo' }, ['areajoo']), true);
+  assert.equal(isOwner({ id: '1', username: 'x', globalName: 'dangcanss' }, ['@DangCanss']), true);
+  assert.equal(isOwner({ id: '99', username: 'x' }, ['99']), true, 'user IDs work too');
+});
+await check('an empty allowlist lets everyone through', () => {
+  assert.equal(isOwner({ id: '3', username: 'steve' }, []), true);
+});
+
+console.log('\nvoice');
+await check('the classic line is his, word for word', () => {
+  assert.equal(
+    GREETING,
+    'hello, im verity your personal helper friend, ask me anything, i know everything',
+  );
+  assert.ok(buildSystemPrompt({ mood: 'friendly' })[0].text.includes(GREETING));
+});
+await check('rudeness is in the persona, limits still above it', () => {
+  const base = buildSystemPrompt({ mood: 'unhinged' })[0].text;
+  assert.match(base, /You are rude/);
+  assert.match(base, /Never about who they are/);
+  assert.match(base, /Never threaten a real person/);
+  assert.match(base, /No slurs/);
+  assert.match(base, /genuinely distressed/);
 });
 
 console.log('\nname trigger');

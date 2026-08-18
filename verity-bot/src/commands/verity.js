@@ -7,7 +7,7 @@ import {
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import * as quota from '../quota.js';
-import { MOODS } from '../persona.js';
+import { GREETING, MOODS } from '../persona.js';
 import { notice } from '../reply.js';
 
 const MODE_LABELS = {
@@ -150,10 +150,14 @@ export async function execute(interaction) {
       const channel = interaction.options.getChannel('channel') ?? interaction.channel;
       const mode = interaction.options.getString('mode') ?? 'mention';
       store.enableChannel(guildId, channel.id, mode, interaction.user.id);
+
+      // He introduces himself in the channel, in his own words.
+      if (channel.isTextBased?.()) {
+        await channel.send(`${GREETING} :D`).catch(() => {});
+      }
+
       return interaction.reply(
-        notice(
-          `Verity has moved into ${channel} — ${MODE_LABELS[mode]}.\nHe says he will be no trouble at all. :D`,
-        ),
+        notice(`Verity has moved into ${channel} — ${MODE_LABELS[mode]}. He let himself in.`),
       );
     }
 

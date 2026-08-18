@@ -8,6 +8,7 @@ import { glitch } from './glitch.js';
 import { splitMessage } from './split.js';
 import { byName } from './commands/index.js';
 import { mentionsName } from './addressed.js';
+import { isOwner } from './owners.js';
 import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
 
@@ -48,6 +49,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   const command = byName.get(interaction.commandName);
   if (!command) return;
+
+  // The allowlist sits above Discord's own permission gating: even a server
+  // owner does not get the commands unless they are on it.
+  const openToAll = config.openCommands.includes(interaction.commandName);
+  if (!openToAll && !isOwner(interaction.user, config.owners)) {
+    return interaction
+      .reply(notice('no. the commands are not for you. go and be useless somewhere else :|'))
+      .catch(() => {});
+  }
 
   try {
     await command.execute(interaction);

@@ -17,6 +17,18 @@ export const config = {
   // Optional: register commands to a single guild (instant) instead of globally (~1h).
   devGuildId: process.env.DISCORD_DEV_GUILD_ID || null,
 
+  // Who may use slash commands. IDs or usernames; blank means everyone.
+  owners: (process.env.VERITY_OWNERS ?? 'areajoo,dangcanss')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean),
+  // Commands the allowlist does not apply to, so you can hand one back to the
+  // channel without opening all of them, e.g. VERITY_OPEN_COMMANDS=ask,prophecy
+  openCommands: (process.env.VERITY_OPEN_COMMANDS ?? '')
+    .split(',')
+    .map((entry) => entry.trim().replace(/^\//, '').toLowerCase())
+    .filter(Boolean),
+
   // Model provider: 'claude' (Anthropic SDK) or 'openai' (any
   // OpenAI-compatible endpoint — Gemini, Groq, OpenRouter, Ollama, ...).
   provider: (process.env.VERITY_PROVIDER || 'claude').toLowerCase(),
