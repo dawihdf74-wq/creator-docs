@@ -1,4 +1,4 @@
-import { InteractionContextType, MessageFlags, SlashCommandBuilder } from 'discord.js';
+import { InteractionContextType, SlashCommandBuilder } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import { nextMood } from '../persona.js';
@@ -8,25 +8,28 @@ import { inCharacterError, REFUSAL_LINE, speak } from '../claude.js';
 export const data = new SlashCommandBuilder()
   .setName('ask')
   .setDescription('Ask Verity something. He is always awake.')
-  .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel)
+  .setContexts(
+    InteractionContextType.Guild,
+    InteractionContextType.BotDM,
+    InteractionContextType.PrivateChannel,
+  )
   .addStringOption((option) =>
     option
       .setName('question')
       .setDescription('What do you want to ask him?')
       .setRequired(true)
       .setMaxLength(1500),
-  )
-  .addBooleanOption((option) =>
-    option.setName('private').setDescription('Only you see the answer. He notices this.'),
   );
 
 export async function execute(interaction) {
   const question = interaction.options.getString('question');
-  const isPrivate = interaction.options.getBoolean('private') ?? false;
 
-  await interaction.deferReply(isPrivate ? { flags: MessageFlags.Ephemeral } : {});
+  // Always public: whatever he says, the channel sees it.
+  await interaction.deferReply();
 
-  const settings = interaction.guildId ? store.getSettings(interaction.guildId) : { mood: 'friendly', autoEscalate: true };
+  const settings = interaction.guildId
+    ? store.getSettings(interaction.guildId)
+    : { mood: 'friendly', autoEscalate: true };
   const session = memory.getSession(interaction.channelId, settings.mood);
 
   if (settings.autoEscalate) {
@@ -47,12 +50,9 @@ export async function execute(interaction) {
 
     if (refused || !text) return interaction.editReply(REFUSAL_LINE);
 
-    // Ephemeral answers stay out of the shared memory - nobody else saw them.
-    if (!isPrivate) {
-      memory.remember(interaction.channelId, 'user', turn.content);
-      memory.remember(interaction.channelId, 'assistant', text);
-      memory.markReplied(interaction.channelId);
-    }
+    memory.remember(interaction.channelId, 'user', turn.content);
+    memory.remember(interaction.channelId, 'assistant', text);
+    memory.markReplied(interaction.channelId);
 
     return interaction.editReply(glitch(text, session.mood).slice(0, 2000));
   } catch (error) {

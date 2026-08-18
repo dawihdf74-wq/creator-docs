@@ -5,7 +5,11 @@ import * as memory from '../memory.js';
 export const data = new SlashCommandBuilder()
   .setName('prophecy')
   .setDescription('Ask Verity what is coming. He always has an answer ready.')
-  .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel);
+  .setContexts(
+    InteractionContextType.Guild,
+    InteractionContextType.BotDM,
+    InteractionContextType.PrivateChannel,
+  );
 
 export async function execute(interaction) {
   // No model call: these are canned, instant, and free.

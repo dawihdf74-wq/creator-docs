@@ -23,6 +23,8 @@ export const config = {
   effort: process.env.VERITY_EFFORT || 'low',
 
   // Behaviour
+  // Command confirmations are visible to the whole channel unless this is off.
+  publicReplies: process.env.VERITY_PUBLIC_REPLIES !== 'false',
   memoryTurns: Number(process.env.VERITY_MEMORY_TURNS || 14),
   dataDir: process.env.VERITY_DATA_DIR || 'data',
 

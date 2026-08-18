@@ -67,8 +67,13 @@ npm run dev             # restart on file change
 | `/verity forget` | Manage Server | Wipe his memory of this channel. |
 | `/verity protect <user> [protected]` | Manage Server | Exempt someone from `/troll` permanently. |
 | `/troll <user> [about] [intensity]` | Manage Messages | Points Verity at one person for a roast. `gentle`, `classic`, or `unhinged`. |
-| `/ask <question> [private]` | Everyone | Ask him something anywhere, even outside his channels. |
+| `/ask <question>` | Everyone | Ask him something anywhere, even outside his channels. |
 | `/prophecy` | Everyone | He tells you what is coming. Free — no model call. |
+
+**Everything he says is public.** Command confirmations included — the whole channel sees
+what Verity was told to do. Set `VERITY_PUBLIC_REPLIES=false` in `.env` if you would
+rather admin notices stayed private to whoever ran them; his actual replies and roasts are
+always public either way.
 
 Permissions are Discord defaults; override them per role in **Server Settings →
 Integrations → Verity** if you want, say, a Moderator role to hold `/troll` without
@@ -93,6 +98,11 @@ friend, or tells him to be quiet. He climbs back down when people are nice to hi
 after 30 minutes of quiet he composes himself one step at a time. The mood changes the
 system prompt *and* how badly his text corrupts on the way out — `friendly` is clean,
 `unhinged` is stutters, held letters, and dropped packets.
+
+**Getting his attention.** In a `mention` channel he answers when you ping him, reply to
+one of his messages, or just say his name — "verity", "Verity!", "hey verity?" all reach
+him, matched on word boundaries so "severity" and "sincerity" don't. In an `all` channel he
+answers everything, subject to `chattiness` and `cooldown`.
 
 **Memory.** The last 14 messages per channel, in memory only. He hears everything said
 in the channels he lives in, whether or not he replies — which is what makes him able to
@@ -139,6 +149,8 @@ src/
   memory.js           per-channel conversation state
   store.js            per-guild settings, persisted to data/guilds.json
   split.js            2000-character message splitting
+  addressed.js        the name trigger
+  reply.js            public vs. ephemeral command notices
   config.js           env loading and defaults
   commands/           verity.js, troll.js, ask.js, prophecy.js
   deploy-commands.js  slash command registration

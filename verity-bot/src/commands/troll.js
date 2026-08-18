@@ -1,13 +1,9 @@
-import {
-  InteractionContextType,
-  MessageFlags,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
-} from 'discord.js';
+import { InteractionContextType, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import { buildTrollBrief, MOODS } from '../persona.js';
 import { glitch } from '../glitch.js';
+import { notice } from '../reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from '../claude.js';
 
 /** Minimum mood the roast is delivered in, per intensity. */
@@ -49,28 +45,30 @@ export async function execute(interaction) {
   const intensity = interaction.options.getString('intensity') ?? 'classic';
 
   if (target.bot) {
-    return interaction.reply({
-      content:
+    return interaction.reply(
+      notice(
         target.id === interaction.client.user.id
           ? 'no.'
           : 'i do not talk to the other ones. you should not either. :|',
-      flags: MessageFlags.Ephemeral,
-    });
+      ),
+    );
   }
 
   if (store.isProtected(interaction.guildId, target.id)) {
-    return interaction.reply({
-      content: `${target.username} is protected. Verity has agreed to leave them alone, and he is being very good about it.`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(
+      notice(
+        `${target.username} is protected. Verity has agreed to leave them alone, and he is being very good about it.`,
+      ),
+    );
   }
 
   const since = Date.now() - (lastTrolled.get(target.id) ?? 0);
   if (since < COOLDOWN_MS) {
-    return interaction.reply({
-      content: `He just did. Give ${target.username} ${Math.ceil((COOLDOWN_MS - since) / 1000)}s to recover.`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(
+      notice(
+        `He just did. Give ${target.username} ${Math.ceil((COOLDOWN_MS - since) / 1000)}s to recover.`,
+      ),
+    );
   }
 
   await interaction.deferReply();
@@ -80,7 +78,8 @@ export async function execute(interaction) {
   const floor = MOOD_FLOOR[intensity] ?? 'clingy';
   const mood = MOODS.indexOf(session.mood) > MOODS.indexOf(floor) ? session.mood : floor;
 
-  const displayName = interaction.guild?.members.cache.get(target.id)?.displayName ?? target.username;
+  const displayName =
+    interaction.guild?.members.cache.get(target.id)?.displayName ?? target.username;
 
   try {
     const { text, refused } = await speak({

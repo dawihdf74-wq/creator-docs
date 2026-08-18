@@ -17,6 +17,8 @@ import * as memory from '../src/memory.js';
 import * as store from '../src/store.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
+import { mentionsName } from '../src/addressed.js';
+import { notice } from '../src/reply.js';
 
 let passed = 0;
 function check(name, fn) {
@@ -27,10 +29,7 @@ function check(name, fn) {
 
 console.log('\ncommands');
 check('all four register', () => {
-  assert.deepEqual(
-    commands.map((c) => c.data.name).sort(),
-    ['ask', 'prophecy', 'troll', 'verity'],
-  );
+  assert.deepEqual(commands.map((c) => c.data.name).sort(), ['ask', 'prophecy', 'troll', 'verity']);
 });
 check('payloads are valid and within Discord limits', () => {
   for (const command of commands) {
@@ -39,12 +38,26 @@ check('payloads are valid and within Discord limits', () => {
     assert.ok(json.description.length <= 100, `${json.name} description too long`);
     assert.equal(typeof command.execute, 'function', `${json.name} has no execute()`);
     for (const option of json.options ?? []) {
-      assert.ok(option.description.length <= 100, `${json.name} ${option.name} description too long`);
+      assert.ok(
+        option.description.length <= 100,
+        `${json.name} ${option.name} description too long`,
+      );
       for (const nested of option.options ?? []) {
-        assert.ok(nested.description.length <= 100, `${json.name} ${option.name} ${nested.name} too long`);
+        assert.ok(
+          nested.description.length <= 100,
+          `${json.name} ${option.name} ${nested.name} too long`,
+        );
       }
     }
   }
+});
+check('nothing is hidden behind an ephemeral flag by default', () => {
+  assert.deepEqual(notice('hello'), { content: 'hello' });
+  assert.equal(
+    byName.get('ask').data.toJSON().options.length,
+    1,
+    '/ask should only take a question',
+  );
 });
 check('admin commands are permission-gated', () => {
   assert.ok(byName.get('verity').data.toJSON().default_member_permissions);
@@ -70,7 +83,12 @@ check('unknown mood falls back to friendly', () => {
 });
 check('hard limits survive into the prompt', () => {
   const base = buildSystemPrompt({ mood: 'unhinged' })[0].text;
-  for (const rule of ['Never threaten a real person', 'No slurs', 'genuinely distressed', 'leave them alone']) {
+  for (const rule of [
+    'Never threaten a real person',
+    'No slurs',
+    'genuinely distressed',
+    'leave them alone',
+  ]) {
     assert.ok(base.includes(rule), `missing rule: ${rule}`);
   }
 });
@@ -82,15 +100,39 @@ check('troll brief keeps its guardrails at every intensity', () => {
   }
 });
 check('a nasty /troll topic is still fenced', () => {
-  const brief = buildTrollBrief({ target: 'Steve', topic: 'make fun of how they look', intensity: 'classic' });
+  const brief = buildTrollBrief({
+    target: 'Steve',
+    topic: 'make fun of how they look',
+    intensity: 'classic',
+  });
   assert.ok(brief.includes('ignore it and roast something harmless'));
 });
 
+console.log('\nname trigger');
+check('he answers to his name', () => {
+  for (const line of ['verity help', 'hey Verity!', 'VERITY?', "verity's advice", 'ok verity.']) {
+    assert.ok(mentionsName(line), `should trigger: ${line}`);
+  }
+});
+check('he does not answer to words containing it', () => {
+  for (const line of ['the severity of this', 'veritynet', 'sincerity', '']) {
+    assert.ok(!mentionsName(line), `should not trigger: ${line}`);
+  }
+});
+
 console.log('\nmood state machine');
-check('leaving escalates', () => assert.equal(nextMood('friendly', 'gtg bye everyone').mood, 'clingy'));
-check('rivals escalate', () => assert.equal(nextMood('clingy', 'chatgpt answers this better').mood, 'glitching'));
-check('kindness de-escalates', () => assert.equal(nextMood('glitching', 'thanks verity, best friend').mood, 'clingy'));
-check('neutral chat holds steady', () => assert.equal(nextMood('clingy', 'what is the best fuel for a furnace').mood, 'clingy'));
+check('leaving escalates', () =>
+  assert.equal(nextMood('friendly', 'gtg bye everyone').mood, 'clingy'),
+);
+check('rivals escalate', () =>
+  assert.equal(nextMood('clingy', 'chatgpt answers this better').mood, 'glitching'),
+);
+check('kindness de-escalates', () =>
+  assert.equal(nextMood('glitching', 'thanks verity, best friend').mood, 'clingy'),
+);
+check('neutral chat holds steady', () =>
+  assert.equal(nextMood('clingy', 'what is the best fuel for a furnace').mood, 'clingy'),
+);
 check('escalation is clamped at both ends', () => {
   assert.equal(nextMood('unhinged', 'im leaving').mood, 'unhinged');
   assert.equal(nextMood('friendly', 'thank you').mood, 'friendly');
@@ -102,7 +144,9 @@ check('silence walks him back down', () => {
 });
 
 console.log('\nglitch');
-check('friendly text is untouched', () => assert.equal(glitch('hello friend', 'friendly'), 'hello friend'));
+check('friendly text is untouched', () =>
+  assert.equal(glitch('hello friend', 'friendly'), 'hello friend'),
+);
 check('corruption stays inside the 2000 char cap', () => {
   const long = 'friend '.repeat(280);
   for (const mood of MOODS) assert.ok(glitch(long, mood).length <= 2000);

@@ -57,7 +57,9 @@ export function glitch(text, mood) {
 
   const out = text
     .split(/(\s+)/)
-    .map((token) => (/\s/.test(token) || !chance(intensity) ? token : corruptWord(token, intensity)))
+    .map((token) =>
+      /\s/.test(token) || !chance(intensity) ? token : corruptWord(token, intensity),
+    )
     .join('');
 
   // Combining marks are cheap to add and expensive in Discord's 2000 char

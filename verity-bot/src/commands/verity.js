@@ -1,13 +1,13 @@
 import {
   ChannelType,
   InteractionContextType,
-  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js';
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import { MOODS } from '../persona.js';
+import { notice } from '../reply.js';
 
 const MODE_LABELS = {
   mention: 'only when mentioned or replied to',
@@ -33,7 +33,12 @@ export const data = new SlashCommandBuilder()
             option
               .setName('channel')
               .setDescription('Defaults to the current channel')
-              .addChannelTypes(ChannelType.GuildText, ChannelType.PublicThread, ChannelType.PrivateThread, ChannelType.GuildAnnouncement),
+              .addChannelTypes(
+                ChannelType.GuildText,
+                ChannelType.PublicThread,
+                ChannelType.PrivateThread,
+                ChannelType.GuildAnnouncement,
+              ),
           )
           .addStringOption((option) =>
             option
@@ -49,9 +54,13 @@ export const data = new SlashCommandBuilder()
         sub
           .setName('disable')
           .setDescription('Take a channel away from Verity')
-          .addChannelOption((option) => option.setName('channel').setDescription('Defaults to the current channel')),
+          .addChannelOption((option) =>
+            option.setName('channel').setDescription('Defaults to the current channel'),
+          ),
       )
-      .addSubcommand((sub) => sub.setName('list').setDescription('Show where Verity is currently installed')),
+      .addSubcommand((sub) =>
+        sub.setName('list').setDescription('Show where Verity is currently installed'),
+      ),
   )
   .addSubcommand((sub) =>
     sub
@@ -92,12 +101,16 @@ export const data = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((sub) => sub.setName('settings').setDescription('Show the current settings'))
-  .addSubcommand((sub) => sub.setName('forget').setDescription('Wipe what Verity remembers in this channel'))
+  .addSubcommand((sub) =>
+    sub.setName('forget').setDescription('Wipe what Verity remembers in this channel'),
+  )
   .addSubcommand((sub) =>
     sub
       .setName('protect')
       .setDescription('Exempt someone from /troll')
-      .addUserOption((option) => option.setName('user').setDescription('Who to protect').setRequired(true))
+      .addUserOption((option) =>
+        option.setName('user').setDescription('Who to protect').setRequired(true),
+      )
       .addBooleanOption((option) =>
         option.setName('protected').setDescription('True to protect, false to remove protection'),
       ),
@@ -113,51 +126,46 @@ export async function execute(interaction) {
       const channel = interaction.options.getChannel('channel') ?? interaction.channel;
       const mode = interaction.options.getString('mode') ?? 'mention';
       store.enableChannel(guildId, channel.id, mode, interaction.user.id);
-      return interaction.reply({
-        content: `Verity has moved into ${channel} — ${MODE_LABELS[mode]}.\nHe says he will be no trouble at all. :D`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.reply(
+        notice(
+          `Verity has moved into ${channel} — ${MODE_LABELS[mode]}.\nHe says he will be no trouble at all. :D`,
+        ),
+      );
     }
 
     if (sub === 'disable') {
       const channel = interaction.options.getChannel('channel') ?? interaction.channel;
       const existed = store.disableChannel(guildId, channel.id);
       memory.forget(channel.id);
-      return interaction.reply({
-        content: existed
-          ? `Verity has been removed from ${channel}. He took it well. :|`
-          : `He was never in ${channel} to begin with.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.reply(
+        notice(
+          existed
+            ? `Verity has been removed from ${channel}. He took it well. :|`
+            : `He was never in ${channel} to begin with.`,
+        ),
+      );
     }
 
     // list
     const channels = store.listChannels(guildId);
     const body = channels.length
-      ? channels.map(([id, entry]) => `• <#${id}> — ${MODE_LABELS[entry.mode] ?? entry.mode}`).join('\n')
+      ? channels
+          .map(([id, entry]) => `• <#${id}> — ${MODE_LABELS[entry.mode] ?? entry.mode}`)
+          .join('\n')
       : '_Nowhere. He is waiting in the package._';
-    return interaction.reply({
-      content: `**Verity is installed in:**\n${body}`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(notice(`**Verity is installed in:**\n${body}`));
   }
 
   if (sub === 'mood') {
     const mood = interaction.options.getString('mood');
     const session = memory.getSession(interaction.channelId, store.getSettings(guildId).mood);
     if (!mood) {
-      return interaction.reply({
-        content: `In this channel he is currently **${session.mood}**.`,
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.reply(notice(`In this channel he is currently **${session.mood}**.`));
     }
     memory.setMood(interaction.channelId, mood);
     // Also becomes the starting mood for channels he hasn't spoken in yet.
     store.updateSettings(guildId, { mood });
-    return interaction.reply({
-      content: `Verity is now **${mood}**. He did not ask to be adjusted.`,
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(notice(`Verity is now **${mood}**. He did not ask to be adjusted.`));
   }
 
   if (sub === 'config') {
@@ -172,43 +180,41 @@ export async function execute(interaction) {
     if (dms !== null) patch.replyInDms = dms;
 
     if (!Object.keys(patch).length) {
-      return interaction.reply({
-        content: 'Give me at least one thing to change. :|',
-        flags: MessageFlags.Ephemeral,
-      });
+      return interaction.reply(notice('Give me at least one thing to change. :|'));
     }
 
     const settings = store.updateSettings(guildId, patch);
-    return interaction.reply({ content: describeSettings(settings), flags: MessageFlags.Ephemeral });
+    return interaction.reply(notice(describeSettings(settings)));
   }
 
   if (sub === 'settings') {
-    return interaction.reply({
-      content: describeSettings(store.getSettings(guildId), store.getGuild(guildId).protected),
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(
+      notice(describeSettings(store.getSettings(guildId), store.getGuild(guildId).protected)),
+    );
   }
 
   if (sub === 'forget') {
     const count = memory.forget(interaction.channelId);
-    return interaction.reply({
-      content: count
-        ? `Wiped ${count} message${count === 1 ? '' : 's'} from his memory of this channel. He will notice.`
-        : 'He had nothing to forget here.',
-      flags: MessageFlags.Ephemeral,
-    });
+    return interaction.reply(
+      notice(
+        count
+          ? `Wiped ${count} message${count === 1 ? '' : 's'} from his memory of this channel. He will notice.`
+          : 'He had nothing to forget here.',
+      ),
+    );
   }
 
   // protect
   const user = interaction.options.getUser('user');
   const wanted = interaction.options.getBoolean('protected') ?? true;
   store.setProtected(guildId, user.id, wanted);
-  return interaction.reply({
-    content: wanted
-      ? `${user} is off limits to \`/troll\`. Verity has written the name down.`
-      : `${user} is fair game again.`,
-    flags: MessageFlags.Ephemeral,
-  });
+  return interaction.reply(
+    notice(
+      wanted
+        ? `${user} is off limits to \`/troll\`. Verity has written the name down.`
+        : `${user} is fair game again.`,
+    ),
+  );
 }
 
 function describeSettings(settings, protectedIds = []) {

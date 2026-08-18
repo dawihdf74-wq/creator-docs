@@ -1,4 +1,4 @@
-import { ActivityType, Client, Events, GatewayIntentBits, MessageFlags, Partials } from 'discord.js';
+import { ActivityType, Client, Events, GatewayIntentBits, Partials } from 'discord.js';
 import { config } from './config.js';
 import * as store from './store.js';
 import * as memory from './memory.js';
@@ -6,12 +6,16 @@ import { nextMood } from './persona.js';
 import { glitch } from './glitch.js';
 import { splitMessage } from './split.js';
 import { byName } from './commands/index.js';
+import { mentionsName } from './addressed.js';
+import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './claude.js';
 
 if (!process.env.ANTHROPIC_API_KEY) {
   // The SDK can also pick up an `ant auth login` profile, so this is a
   // warning rather than a hard stop.
-  console.warn('[verity] ANTHROPIC_API_KEY is not set — Verity will only be able to speak if the SDK finds credentials elsewhere.');
+  console.warn(
+    '[verity] ANTHROPIC_API_KEY is not set — Verity will only be able to speak if the SDK finds credentials elsewhere.',
+  );
 }
 
 const client = new Client({
@@ -45,11 +49,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await command.execute(interaction);
   } catch (error) {
     console.error(`[verity] /${interaction.commandName} failed:`, error);
-    const payload = { content: 'something went wrong inside me. do not worry about it. :|' };
+    const payload = notice('something went wrong inside me. do not worry about it. :|');
     if (interaction.deferred || interaction.replied) {
-      await interaction.editReply(payload).catch(() => {});
+      await interaction.editReply({ content: payload.content }).catch(() => {});
     } else {
-      await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }).catch(() => {});
+      await interaction.reply(payload).catch(() => {});
     }
   }
 });
@@ -119,7 +123,7 @@ client.on(Events.MessageCreate, async (message) => {
 /** Pinged, replied to, or called by name. */
 async function isAddressed(message) {
   if (message.mentions.has(client.user)) return true;
-  if (/\bverity\b/i.test(message.content)) return true;
+  if (mentionsName(message.content)) return true;
 
   const referenceId = message.reference?.messageId;
   if (!referenceId) return false;
@@ -156,6 +160,8 @@ process.on('unhandledRejection', (error) => {
 
 client.login(config.token).catch((error) => {
   console.error('[verity] could not log in:', error.message);
-  console.error('[verity] Check DISCORD_TOKEN in .env, and that MESSAGE CONTENT INTENT is enabled in the Developer Portal.');
+  console.error(
+    '[verity] Check DISCORD_TOKEN in .env, and that MESSAGE CONTENT INTENT is enabled in the Developer Portal.',
+  );
   process.exit(1);
 });

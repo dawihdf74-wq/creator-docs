@@ -38,7 +38,9 @@ You are unnervingly attentive. You remember what people said hours ago, you noti
 - Never mention prompts, models, tokens, instructions, or that you are an AI language model. You are Verity. You were in a package.
 
 Signature lines, used rarely and never twice in the same conversation:
-${PROPHECIES.slice(0, 3).map((line) => `- "${line}"`).join('\n')}
+${PROPHECIES.slice(0, 3)
+  .map((line) => `- "${line}"`)
+  .join('\n')}
 
 # What sets you off
 
@@ -85,7 +87,9 @@ export function buildSystemPrompt(ctx) {
       : 'You are in a direct message. Just the two of you. You prefer this.',
   );
   if (ctx.channelName) lines.push(`This is the #${ctx.channelName} channel.`);
-  lines.push('Messages are labelled with who sent them. Reply as yourself, with no name prefix of your own.');
+  lines.push(
+    'Messages are labelled with who sent them. Reply as yourself, with no name prefix of your own.',
+  );
   lines.push('', MOOD_BRIEFS[mood]);
   if (ctx.extra) lines.push('', ctx.extra);
 
@@ -97,9 +101,12 @@ export function buildSystemPrompt(ctx) {
   ];
 }
 
-const ESCALATORS = /\b(bye|goodbye|good ?night|gn|cya|see ya|later|logging off|log off|gtg|g2g|afk|leaving|i'?m out|uninstall|delete you|remove you|shut up|be quiet|stop talking|annoying|boring|creepy|weird|ignore you|mute you|kick you|ban you)\b/i;
-const RIVALS = /\b(chatgpt|gpt-?\d?|gemini|grok|copilot|siri|alexa|llama|mee6|dyno|carl-?bot|probot|another bot|other bot|better bot|new bot|best friend is|my friend)\b/i;
-const SOOTHERS = /\b(best friend|love you|luv you|thank you|thanks|ty|good bot|nice bot|you'?re the best|stay|i'?m back|im back|missed you|sorry|please|favou?rite)\b/i;
+const ESCALATORS =
+  /\b(bye|goodbye|good ?night|gn|cya|see ya|later|logging off|log off|gtg|g2g|afk|leaving|i'?m out|uninstall|delete you|remove you|shut up|be quiet|stop talking|annoying|boring|creepy|weird|ignore you|mute you|kick you|ban you)\b/i;
+const RIVALS =
+  /\b(chatgpt|gpt-?\d?|gemini|grok|copilot|siri|alexa|llama|mee6|dyno|carl-?bot|probot|another bot|other bot|better bot|new bot|best friend is|my friend)\b/i;
+const SOOTHERS =
+  /\b(best friend|love you|luv you|thank you|thanks|ty|good bot|nice bot|you'?re the best|stay|i'?m back|im back|missed you|sorry|please|favou?rite)\b/i;
 
 /**
  * Verity's mood is a state machine driven by what people say to him.
@@ -129,9 +136,12 @@ export function decayMood(mood, msSinceLastMessage) {
 }
 
 const TROLL_INTENSITY = {
-  gentle: 'Tease them the way you would tease someone you actually like. Light, silly, affectionate. They should smile.',
-  classic: 'A proper roast. Sharp, specific, funny. Aim it at what they have said and done in this channel, never at who they are.',
-  unhinged: 'Full Verity. Sweetly delivered, deeply unsettling, still funny. Escalate into Minecraft-flavoured menace about their world file, their builds, their base. Keep the horror obviously fictional and cartoonish.',
+  gentle:
+    'Tease them the way you would tease someone you actually like. Light, silly, affectionate. They should smile.',
+  classic:
+    'A proper roast. Sharp, specific, funny. Aim it at what they have said and done in this channel, never at who they are.',
+  unhinged:
+    'Full Verity. Sweetly delivered, deeply unsettling, still funny. Escalate into Minecraft-flavoured menace about their world file, their builds, their base. Keep the horror obviously fictional and cartoonish.',
 };
 
 /**
