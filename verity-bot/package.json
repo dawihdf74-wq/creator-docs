@@ -1,0 +1,23 @@
+{
+  "name": "verity-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Verity(tm) - an AI Discord bot with the personality of Verity from the Minecraft analog-horror ARG",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=20.10.0"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "node test/dry-run.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
+    "discord.js": "^14.27.0",
+    "dotenv": "^17.4.2"
+  }
+}
