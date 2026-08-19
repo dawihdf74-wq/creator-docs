@@ -120,6 +120,41 @@ export const data = new SlashCommandBuilder()
           .setMaxValue(720),
       ),
   )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('faq')
+      .setDescription('Canned answers, delivered instantly and for free')
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Teach him an answer he can give without thinking')
+          .addStringOption((option) =>
+            option
+              .setName('triggers')
+              .setDescription('Comma separated, e.g. server ip, whats the ip')
+              .setRequired(true),
+          )
+          .addStringOption((option) =>
+            option
+              .setName('answer')
+              .setDescription('What he says. {user} becomes whoever asked.')
+              .setRequired(true),
+          ),
+      )
+      .addSubcommand((sub) => sub.setName('list').setDescription('Show the canned answers'))
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Drop one')
+          .addIntegerOption((option) =>
+            option
+              .setName('number')
+              .setDescription('From /verity faq list')
+              .setRequired(true)
+              .setMinValue(0),
+          ),
+      ),
+  )
   .addSubcommand((sub) => sub.setName('settings').setDescription('Show the current settings'))
   .addSubcommand((sub) =>
     sub
@@ -187,6 +222,51 @@ export async function execute(interaction) {
           .join('\n')
       : '_Nowhere. He is waiting in the package._';
     return interaction.reply(notice(`**Verity is installed in:**\n${body}`));
+  }
+
+  if (group === 'faq') {
+    if (sub === 'add') {
+      const triggers = interaction.options
+        .getString('triggers')
+        .split(',')
+        .map((word) => word.trim())
+        .filter(Boolean);
+      const answer = interaction.options.getString('answer');
+      if (!triggers.length) return interaction.reply(notice('Give him something to listen for.'));
+      store.addAnswer(guildId, triggers, answer);
+      return interaction.reply(
+        notice(`He will now answer **${triggers.join('**, **')}** with:\n> ${answer}`),
+      );
+    }
+
+    if (sub === 'remove') {
+      const removed = store.removeAnswer(guildId, interaction.options.getInteger('number'));
+      return interaction.reply(
+        notice(removed ? `Forgotten: "${removed.answer}"` : 'There is no answer with that number.'),
+      );
+    }
+
+    const entries = store.listAnswers(guildId);
+    if (!entries.length) {
+      return interaction.reply(
+        notice(
+          'No canned answers yet. `/verity faq add triggers:server ip answer:play.example.com`',
+        ),
+      );
+    }
+    return interaction.reply(
+      notice(
+        ['**Canned answers**']
+          .concat(
+            entries.map(
+              (entry, index) =>
+                `\`${index}\` [${entry.triggers.join(', ')}] → ${entry.answer} _(${entry.hits ?? 0} hits)_`,
+            ),
+          )
+          .join('\n')
+          .slice(0, 1900),
+      ),
+    );
   }
 
   if (sub === 'mood') {

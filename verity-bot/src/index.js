@@ -11,6 +11,8 @@ import { splitMessage } from './split.js';
 import { byName } from './commands/index.js';
 import { mentionsName } from './addressed.js';
 import { looksLikeQuestion } from './question.js';
+import { match as matchAnswer, fill } from './faq.js';
+import { startConsole } from './console.js';
 import { isOwner } from './owners.js';
 import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
@@ -84,6 +86,7 @@ const warnedOfQuota = new Set();
 
 client.once(Events.ClientReady, (ready) => {
   console.log(`[verity] the package has been opened. logged in as ${ready.user.tag}`);
+  startConsole(client);
   ready.user.setPresence({
     status: 'online',
     activities: [{ name: 'you, mostly', type: ActivityType.Watching }],
@@ -158,6 +161,20 @@ client.on(Events.MessageCreate, async (message) => {
   if (settings.questionsOnly && !looksLikeQuestion(message.content)) return;
 
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
+  // A canned answer costs nothing and arrives instantly, so it is checked
+  // before the throttle, the quota and the model.
+  const canned = matchAnswer(store.listAnswers(message.guildId ?? 'dm'), message.content);
+  if (canned) {
+    store.countAnswerHit(canned);
+    const answer = fill(canned.answer, label);
+    memory.remember(message.channelId, 'assistant', answer);
+    memory.markReplied(message.channelId);
+    await message
+      .reply({ content: glitch(answer, session.mood), allowedMentions: { repliedUser: false } })
+      .catch(() => {});
+    return;
+  }
+
   if (busy.has(message.channelId)) return;
 
   // Over the rate limit, or cooling off after the provider said no: say so

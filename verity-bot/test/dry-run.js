@@ -23,6 +23,8 @@ import * as modelChain from '../src/models.js';
 import { shouldSay, forget as forgetSaid } from '../src/announce.js';
 import { GREETING } from '../src/persona.js';
 import { looksLikeQuestion } from '../src/question.js';
+import { match as matchAnswer, fill } from '../src/faq.js';
+import { createConsole } from '../src/console.js';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -387,6 +389,135 @@ await check('the window expires', () => {
       resolve();
     }, 5),
   );
+});
+
+console.log('\ncanned answers');
+const faqEntries = [
+  { triggers: ['server ip', 'whats the ip'], answer: 'play.example.com, {user}' },
+  { triggers: ['how join'], answer: 'you just connect. obviously.' },
+  { triggers: ['rules'], answer: 'do not be a dickhead.' },
+];
+await check('matches however the question is phrased', () => {
+  for (const line of [
+    'yo whats the ip for the server again',
+    'server ip?',
+    '<@1> ip address for server',
+  ]) {
+    assert.ok(matchAnswer(faqEntries, line), `should match: ${line}`);
+  }
+  assert.equal(matchAnswer(faqEntries, 'how do i join')?.answer, 'you just connect. obviously.');
+});
+await check('leaves unrelated messages alone', () => {
+  for (const line of ['what version is the server', 'hello', '']) {
+    assert.equal(matchAnswer(faqEntries, line), null, `should not match: ${line}`);
+  }
+});
+await check('the more specific trigger wins', () => {
+  const entries = [
+    { triggers: ['ip'], answer: 'generic' },
+    { triggers: ['bedrock ip'], answer: 'specific' },
+  ];
+  assert.equal(matchAnswer(entries, 'whats the bedrock ip').answer, 'specific');
+});
+await check('{user} is filled in', () => {
+  assert.equal(fill('play.example.com, {user}', 'dave'), 'play.example.com, dave');
+});
+await check('answers persist per guild', () => {
+  store.addAnswer('guild-faq', ['test trigger'], 'test answer');
+  assert.equal(store.listAnswers('guild-faq').length, 1);
+  assert.equal(
+    matchAnswer(store.listAnswers('guild-faq'), 'test trigger please').answer,
+    'test answer',
+  );
+  assert.equal(store.removeAnswer('guild-faq', 0).answer, 'test answer');
+  assert.equal(store.listAnswers('guild-faq').length, 0);
+  assert.equal(store.removeAnswer('guild-faq', 5), null, 'a bad index is refused');
+});
+
+console.log('\ncontrol console');
+const sent = [];
+const fakeChannel = {
+  id: 'chan-console',
+  name: 'general',
+  send: async (content) => sent.push(content),
+};
+const fakeClient = {
+  guilds: { cache: { first: () => ({ id: 'guild-console', name: 'Test SMP' }) } },
+  channels: {
+    cache: new Map([['chan-console', fakeChannel]]),
+  },
+};
+fakeClient.channels.cache.find = (fn) => [...fakeClient.channels.cache.values()].find(fn);
+
+const printed = [];
+const { run } = createConsole(fakeClient, (line = '') => printed.push(line));
+const lastOutput = () => printed.at(-1) ?? '';
+const clear = () => (printed.length = 0);
+
+await check('status reports what he is doing', async () => {
+  clear();
+  await run('status');
+  const all = printed.join('\n');
+  assert.match(all, /provider/);
+  assert.match(all, /Test SMP/);
+});
+await check('faq add, list, test and remove all work', async () => {
+  clear();
+  await run('faq add server ip, whats the ip = play.example.com, {user}');
+  assert.match(lastOutput(), /instantly/);
+
+  clear();
+  await run('faq');
+  assert.match(printed.join('\n'), /play\.example\.com/);
+
+  clear();
+  await run('faq test yo whats the ip again');
+  assert.match(lastOutput(), /play\.example\.com/);
+
+  clear();
+  await run('faq test what version is this');
+  assert.match(lastOutput(), /nothing matches/);
+
+  clear();
+  await run('faq remove 0');
+  assert.match(lastOutput(), /removed/);
+});
+await check('a malformed faq add is explained, not swallowed', async () => {
+  clear();
+  await run('faq add just a trigger with no answer');
+  assert.match(lastOutput(), /format:/);
+  assert.equal(store.listAnswers('guild-console').length, 0);
+});
+await check('say posts to a channel', async () => {
+  clear();
+  await run('say #general get back in the mine');
+  assert.deepEqual(sent, ['get back in the mine']);
+  assert.match(lastOutput(), /sent to #general/);
+});
+await check('mood changes it everywhere', async () => {
+  clear();
+  await run('mood unhinged');
+  assert.match(lastOutput(), /unhinged/);
+  assert.equal(store.getSettings('guild-console').mood, 'unhinged');
+
+  clear();
+  await run('mood sideways');
+  assert.match(lastOutput(), /pick one of/);
+});
+await check('nonsense gets told off', async () => {
+  clear();
+  await run('summon the ancient one');
+  assert.match(lastOutput(), /try "help"/);
+});
+await check('quit hands control back rather than killing the process', async () => {
+  let quit = false;
+  const { run: run2 } = createConsole(
+    fakeClient,
+    () => {},
+    () => (quit = true),
+  );
+  await run2('quit');
+  assert.equal(quit, true);
 });
 
 console.log('\nstore');

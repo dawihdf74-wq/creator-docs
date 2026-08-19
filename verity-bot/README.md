@@ -169,6 +169,70 @@ anywhere, but the voice itself is the model's job.
 
 ---
 
+## Controlling him from the terminal
+
+The window running `npm start` is a control console. Type `help` for the list:
+
+```
+verity> status
+  provider   openai (local) · qwen3:4b
+  server     Test SMP · 2 channel(s)
+  throttled  no
+  answers    6 canned
+
+verity> say #general get back in the mine
+verity> mood #general unhinged
+verity> ask what is the point of you
+  > to be better than you at everything, obviously :D
+verity> faq add server ip, whats the ip = play.example.com, {user}
+verity> quit
+```
+
+| Command | What it does |
+| --- | --- |
+| `status` | Provider, model chain, channels, whether he's throttled |
+| `channels` | Where he's installed, and each channel's mood |
+| `say <#channel> <text>` | Post a message as Verity |
+| `ask <text>` | Ask him something in the terminal, without touching Discord |
+| `mood [<#channel>] <mood>` | Set the mood, everywhere or in one channel |
+| `wipe [<#channel>]` | Make him forget a conversation |
+| `faq …` | Manage canned answers, below |
+| `quota [reset]` | Question budgets |
+| `models` | The fallback chain and what's spent |
+| `quit` | Shut him down |
+
+None of it goes through Discord, so it works regardless of the slash-command allowlist
+or whether Discord has caught up with a command change. When Verity runs as a background
+service with no terminal attached, the console quietly does not start.
+
+---
+
+## Canned answers
+
+Questions your server asks constantly don't need a model. A canned answer arrives
+instantly, costs nothing, and never counts against anyone's quota — which matters most on
+a laptop model, where the alternative is fifteen seconds of your CPU improvising over
+"what's the ip" for the fortieth time.
+
+From the console:
+
+```
+verity> faq add server ip, whats the ip = play.example.com, {user}
+verity> faq test yo whats the ip for the server again
+  → play.example.com, {user}
+verity> faq                 # list them, with hit counts
+verity> faq remove 0
+```
+
+Or in Discord: `/verity faq add`, `/verity faq list`, `/verity faq remove`.
+
+Triggers match loosely — every meaningful word has to appear somewhere in the message, in
+any order — so `server ip` catches "yo whats the ip for the server again". The most
+specific trigger wins, so a `bedrock ip` entry beats a plain `ip` one. `{user}` becomes
+whoever asked.
+
+---
+
 ## Commands
 
 **Slash commands are locked to an allowlist.** Out of the box that's `areajoo` and
@@ -294,6 +358,8 @@ src/
   quota.js            per-person question budgets
   models.js           the fallback chain and per-model budgets
   question.js         is this message actually asking him something
+  console.js          the terminal control console
+  faq.js              canned answers and their loose matching
   setup-local.js      `npm run local` — set him up on a model on this machine
   throttle.js         per-minute cap + backoff when the provider says no
   announce.js         says a thing once, not after every message

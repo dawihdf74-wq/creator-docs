@@ -51,12 +51,14 @@ export function getGuild(guildId) {
       channels: {},
       settings: { ...config.defaults },
       protected: [],
+      faq: [],
     };
     save();
   }
   // Backfill any setting added in a later version of the bot.
   guild.settings = { ...config.defaults, ...guild.settings };
   guild.protected ??= [];
+  guild.faq ??= [];
   guild.channels ??= {};
   return guild;
 }
@@ -109,6 +111,30 @@ export function setProtected(guildId, userId, isProtected) {
 
 export function isProtected(guildId, userId) {
   return getGuild(guildId).protected.includes(userId);
+}
+
+/** Canned answers, newest last. Triggers are matched loosely — see faq.js. */
+export function addAnswer(guildId, triggers, answer) {
+  const entry = { triggers, answer, added: Date.now(), hits: 0 };
+  getGuild(guildId).faq.push(entry);
+  save();
+  return entry;
+}
+
+export function removeAnswer(guildId, index) {
+  const faq = getGuild(guildId).faq;
+  if (index < 0 || index >= faq.length) return null;
+  const [removed] = faq.splice(index, 1);
+  save();
+  return removed;
+}
+
+export const listAnswers = (guildId) => getGuild(guildId).faq;
+
+/** Bump the hit counter so you can see which ones are earning their place. */
+export function countAnswerHit(entry) {
+  entry.hits = (entry.hits ?? 0) + 1;
+  save();
 }
 
 /** Flush pending writes on shutdown. */
