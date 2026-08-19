@@ -553,6 +553,7 @@ await check('pasted lines do not overlap and misfire', async () => {
   assert.equal(state.channel, null, 'and the selection ended up cleared');
 });
 await check('say posts to a channel', async () => {
+  sent.length = 0;
   clear();
   await run('say #general get back in the mine');
   assert.deepEqual(sent, ['get back in the mine']);
