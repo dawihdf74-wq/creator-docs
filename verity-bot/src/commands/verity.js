@@ -1,6 +1,7 @@
 import {
   ChannelType,
   InteractionContextType,
+  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
 } from 'discord.js';
@@ -155,6 +156,29 @@ export const data = new SlashCommandBuilder()
           ),
       ),
   )
+  .addSubcommand((sub) =>
+    sub
+      .setName('say')
+      .setDescription('Put words in his mouth')
+      .addStringOption((option) =>
+        option
+          .setName('message')
+          .setDescription('What he says')
+          .setRequired(true)
+          .setMaxLength(1900),
+      )
+      .addChannelOption((option) =>
+        option
+          .setName('channel')
+          .setDescription('Where. Defaults to this channel.')
+          .addChannelTypes(
+            ChannelType.GuildText,
+            ChannelType.PublicThread,
+            ChannelType.PrivateThread,
+            ChannelType.GuildAnnouncement,
+          ),
+      ),
+  )
   .addSubcommand((sub) => sub.setName('settings').setDescription('Show the current settings'))
   .addSubcommand((sub) =>
     sub
@@ -267,6 +291,20 @@ export async function execute(interaction) {
           .slice(0, 1900),
       ),
     );
+  }
+
+  if (sub === 'say') {
+    const channel = interaction.options.getChannel('channel') ?? interaction.channel;
+    const message = interaction.options.getString('message');
+    if (!channel.isTextBased?.()) {
+      return interaction.reply(notice('He cannot speak in that kind of channel.'));
+    }
+    await channel.send(message);
+    // Ephemeral on purpose: a public confirmation would give away the trick.
+    return interaction.reply({
+      content: `Said in ${channel}.`,
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   if (sub === 'mood') {

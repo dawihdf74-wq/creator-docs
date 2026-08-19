@@ -19,20 +19,28 @@ import { match as matchAnswer } from './faq.js';
  */
 
 const HELP = `
-  status                 what he is doing right now
-  channels               where he is installed
-  say <#channel> <text>  post a message as Verity
-  ask <text>             ask him something here, without touching Discord
-  mood [<#channel>] <m>  ${MOODS.join(' | ')}
-  wipe [<#channel>]      forget a channel's conversation
-  faq                    list the canned answers
-  faq add <trigger[, trigger]> = <answer>
-  faq remove <n>         drop answer number n
-  faq test <text>        see which answer a message would hit
-  quota [reset]          who has spent their questions
-  models                 the fallback chain and what is spent
-  help                   this
-  quit                   shut him down
+  Pick a channel and then just type — everything you type goes out as Verity.
+
+  use #general                 speak as Verity in #general from now on
+  use none                     stop, back to plain commands
+  #general hello everyone      post one message without selecting anything
+  say #general hello           the same thing, spelled out
+  ask why are you like this    ask him something here, no Discord involved
+
+  status                       what he is doing right now
+  channels                     where he is installed
+  mood unhinged                ${MOODS.join(' | ')}
+  mood #general clingy         just that channel
+  wipe #general                make him forget that conversation
+
+  faq                          list the canned answers
+  faq add server ip, whats the ip = play.example.com
+  faq test whats the server ip
+  faq remove 0
+
+  quota                        who has spent their questions
+  models                       the fallback chain and what is spent
+  quit                         shut him down
 `;
 
 /**
@@ -43,25 +51,54 @@ const HELP = `
  * @param {(line?: string) => void} out where output goes
  */
 export function createConsole(client, out = (line = '') => console.log(line), onQuit = () => {}) {
+  /** The channel currently being spoken into, if any. */
+  const state = { channel: null };
   /** The guild to act on: the only one he is in, unless there are several. */
   const guildId = () => client.guilds.cache.first()?.id ?? 'dm';
 
-  /** Accepts <#id>, a raw id, or a channel name. */
+  /**
+   * Accepts <#id>, a raw id, "#general", or "general" — and matches loosely,
+   * because a channel called "💬︱general" should still answer to "general".
+   */
+  const plain = (text) =>
+    String(text ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
   function findChannel(token) {
     if (!token) return null;
+
     const id = token.replace(/[<#>]/g, '');
+    const byId = client.channels.cache.get(id);
+    if (byId) return byId;
+
+    const wanted = plain(token);
+    if (!wanted) return null;
+
+    const channels = [...client.channels.cache.values()].filter((channel) => channel.name);
     return (
-      client.channels.cache.get(id) ??
-      client.channels.cache.find((channel) => channel.name === token.replace(/^#/, '')) ??
+      channels.find((channel) => plain(channel.name) === wanted) ??
+      channels.find((channel) => plain(channel.name).includes(wanted)) ??
       null
     );
   }
 
-  async function run(line) {
-    const [command, ...rest] = line.trim().split(/\s+/);
-    const args = rest.join(' ');
+  /** Names the channels he can actually see, for when a guess misses. */
+  const channelList = () =>
+    [...client.channels.cache.values()]
+      .filter((channel) => channel.name)
+      .map((channel) => `#${channel.name}`)
+      .join(', ') || 'none he can see';
 
-    switch ((command ?? '').toLowerCase()) {
+  async function dispatch(line) {
+    // People copy the help text literally, brackets and all. Take it anyway.
+    const cleaned = line.trim().replace(/^<(.+)>$/, '$1');
+    const [rawCommand, ...rest] = cleaned.split(/\s+/);
+    // "/help" and "help" are the same thing here.
+    const command = rawCommand.replace(/^\//, '');
+    const args = rest.join(' ').replace(/^<(.+)>$/, '$1');
+
+    switch (command.toLowerCase()) {
       case '':
         return;
 
@@ -81,6 +118,32 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         return;
       }
 
+      case 'use':
+      case 'select':
+      case 'speak': {
+        const target = rest[0];
+        if (!target) {
+          return out(
+            state.channel
+              ? `  speaking as Verity in #${state.channel.name}. "use none" to stop.`
+              : '  no channel selected. try: use #general',
+          );
+        }
+        if (['none', 'off', 'stop', 'clear'].includes(target.toLowerCase())) {
+          state.channel = null;
+          return out('  back to commands only.');
+        }
+        const channel = findChannel(target);
+        if (!channel) {
+          out(`  no channel matching "${target}".`);
+          return out(`  he can see: ${channelList()}`);
+        }
+        state.channel = channel;
+        return out(
+          `  anything you type now goes to #${channel.name} as Verity. "use none" to stop.`,
+        );
+      }
+
       case 'channels': {
         const channels = store.listChannels(guildId());
         if (!channels.length) return out('  nowhere yet — use /verity channel enable in Discord');
@@ -94,9 +157,13 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       case 'say': {
         const [target, ...words] = rest;
         const channel = findChannel(target);
-        if (!channel) return out('  which channel? try: say #general hello');
-        if (!words.length) return out('  say what?');
-        for (const chunk of splitMessage(words.join(' '))) await channel.send(chunk);
+        if (!channel) {
+          out(`  no channel matching "${target ?? ''}".`);
+          return out(`  he can see: ${channelList()}`);
+        }
+        const text = words.join(' ').replace(/^<(.+)>$/, '$1');
+        if (!text) return out(`  say what? try: say #${channel.name} hello`);
+        for (const chunk of splitMessage(text)) await channel.send(chunk);
         return out(`  sent to #${channel.name}`);
       }
 
@@ -168,8 +235,29 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         out('  he does not want you to go.');
         return onQuit();
 
-      default:
-        return out(`  no. try "help".`);
+      default: {
+        // With a channel selected, plain typing is Verity talking. Held in a
+        // local so a later "use none" cannot redirect a message mid-send.
+        const selected = state.channel;
+        if (selected) {
+          for (const chunk of splitMessage(cleaned)) await selected.send(chunk);
+          return out(`  → #${selected.name}`);
+        }
+
+        // "#general hello" is the obvious thing to type, so make it work.
+        const channel = findChannel(command);
+        if (channel && args) {
+          for (const chunk of splitMessage(args)) await channel.send(chunk);
+          return out(`  sent to #${channel.name}`);
+        }
+        if (command.startsWith('#')) {
+          out(`  no channel matching "${command}".`);
+          return out(`  he can see: ${channelList()}`);
+        }
+        return out(
+          `  not a command. "help" for the list, or "ask ${cleaned}" to put that to Verity.`,
+        );
+      }
     }
   }
 
@@ -217,7 +305,19 @@ export function createConsole(client, out = (line = '') => console.log(line), on
     return out('  faq | faq add <triggers> = <answer> | faq remove <n> | faq test <text>');
   }
 
-  return { run, help: HELP };
+  // Lines run strictly one at a time. Typed input arrives slowly enough not
+  // to care, but pasting a block delivers every line at once, and overlapping
+  // handlers can send a message to a channel that was deselected in between.
+  let queue = Promise.resolve();
+  const run = (line) => {
+    queue = queue.then(
+      () => dispatch(line),
+      () => dispatch(line),
+    );
+    return queue;
+  };
+
+  return { run, help: HELP, state };
 }
 
 /** Wires the dispatcher above to the terminal Verity is running in. */
@@ -231,7 +331,7 @@ export function startConsole(client) {
     prompt: 'verity> ',
   });
 
-  const { run } = createConsole(
+  const { run, state } = createConsole(
     client,
     (line = '') => console.log(line),
     () => {
@@ -246,6 +346,8 @@ export function startConsole(client) {
     } catch (error) {
       console.error('  console error:', error.message);
     }
+    // The prompt shows where your typing is going.
+    rl.setPrompt(state.channel ? `verity #${state.channel.name}> ` : 'verity> ');
     rl.prompt();
   });
   rl.on('SIGINT', () => process.emit('SIGINT'));

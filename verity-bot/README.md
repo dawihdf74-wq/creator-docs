@@ -171,7 +171,21 @@ anywhere, but the voice itself is the model's job.
 
 ## Controlling him from the terminal
 
-The window running `npm start` is a control console. Type `help` for the list:
+The window running `npm start` is a control console. Type `help` for the list.
+
+**Pick a channel and just type** — everything you write goes out as Verity:
+
+```
+verity> use #general
+  anything you type now goes to #general as Verity. "use none" to stop.
+verity #general> get back in the mine
+  → #general
+verity #general> use none
+  back to commands only.
+```
+
+The prompt shows where your typing is going. For a single message without selecting
+anything, `#general hello` works on its own — no verb needed.
 
 ```
 verity> status
@@ -180,7 +194,6 @@ verity> status
   throttled  no
   answers    6 canned
 
-verity> say #general get back in the mine
 verity> mood #general unhinged
 verity> ask what is the point of you
   > to be better than you at everything, obviously :D
@@ -188,11 +201,16 @@ verity> faq add server ip, whats the ip = play.example.com, {user}
 verity> quit
 ```
 
+Channel names match loosely, so `#general` finds `💬︱general-chat`, and a leading `/` is
+fine if that is how your fingers work.
+
 | Command | What it does |
 | --- | --- |
 | `status` | Provider, model chain, channels, whether he's throttled |
 | `channels` | Where he's installed, and each channel's mood |
-| `say <#channel> <text>` | Post a message as Verity |
+| `use #channel` | Speak as Verity in that channel — then just type. `use none` stops |
+| `#channel <text>` | Post one message without selecting anything |
+| `say <#channel> <text>` | The same, spelled out |
 | `ask <text>` | Ask him something in the terminal, without touching Discord |
 | `mood [<#channel>] <mood>` | Set the mood, everywhere or in one channel |
 | `wipe [<#channel>]` | Make him forget a conversation |
@@ -258,6 +276,7 @@ member, Copy User ID.
 | `/verity quota [user] [reset]` | Manage Server | Check how many questions someone has used, or hand them back. |
 | `/verity forget` | Manage Server | Wipe his memory of this channel. |
 | `/verity protect <user> [protected]` | Manage Server | Exempt someone from `/troll` permanently. |
+| `/verity say <message> [channel]` | Manage Server | Put words in his mouth. The confirmation is private, so the trick stays hidden. |
 | `/troll <user> [about] [intensity]` | Manage Messages | Points Verity at one person for a roast. `gentle`, `classic`, or `unhinged`. |
 | `/ask <question>` | Everyone | Ask him something anywhere, even outside his channels. |
 | `/prophecy` | Everyone | He tells you what is coming. Free — no model call. |

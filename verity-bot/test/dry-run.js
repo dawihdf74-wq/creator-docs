@@ -450,7 +450,7 @@ const fakeClient = {
 fakeClient.channels.cache.find = (fn) => [...fakeClient.channels.cache.values()].find(fn);
 
 const printed = [];
-const { run } = createConsole(fakeClient, (line = '') => printed.push(line));
+const { run, state } = createConsole(fakeClient, (line = '') => printed.push(line));
 const lastOutput = () => printed.at(-1) ?? '';
 const clear = () => (printed.length = 0);
 
@@ -488,6 +488,70 @@ await check('a malformed faq add is explained, not swallowed', async () => {
   assert.match(lastOutput(), /format:/);
   assert.equal(store.listAnswers('guild-console').length, 0);
 });
+await check('a channel can be selected, then plain typing goes to it', async () => {
+  sent.length = 0;
+  clear();
+  await run('use #general');
+  assert.match(lastOutput(), /goes to #general/);
+
+  await run('get in the mine');
+  assert.deepEqual(sent, ['get in the mine'], 'plain text became a message');
+
+  clear();
+  await run('status'); // commands still work while a channel is selected
+  assert.match(printed.join('\n'), /provider/);
+  assert.equal(sent.length, 1, 'and are not posted to the channel');
+
+  clear();
+  await run('use none');
+  assert.match(lastOutput(), /commands only/);
+  await run('this should not be sent');
+  assert.equal(sent.length, 1);
+});
+await check('a channel with emoji in its name still answers to its word', async () => {
+  const decorated = { id: 'chan-emoji', name: '💬︱general-chat', send: async () => {} };
+  fakeClient.channels.cache.set('chan-emoji', decorated);
+  clear();
+  await run('use general-chat');
+  assert.match(lastOutput(), /general-chat/);
+  await run('use none');
+  fakeClient.channels.cache.delete('chan-emoji');
+});
+await check('#channel shorthand posts without any verb', async () => {
+  sent.length = 0;
+  clear();
+  await run('#general oi');
+  assert.deepEqual(sent, ['oi']);
+});
+await check('a leading slash is tolerated', async () => {
+  clear();
+  await run('/status');
+  assert.match(printed.join('\n'), /provider/);
+});
+await check('a missed channel says so and lists the real ones', async () => {
+  clear();
+  await run('#nowhere hello');
+  assert.match(printed.join('\n'), /no channel matching/);
+  assert.match(printed.join('\n'), /#general/);
+});
+await check('unknown input suggests how to talk to him', async () => {
+  clear();
+  await run('hi');
+  assert.match(lastOutput(), /ask hi/);
+});
+await check('pasted lines do not overlap and misfire', async () => {
+  sent.length = 0;
+  clear();
+  // Fired without awaiting, exactly as readline delivers a pasted block.
+  run('use #general');
+  run('this one should go');
+  run('use none');
+  const settled = run('this one should not');
+  await settled;
+
+  assert.deepEqual(sent, ['this one should go'], 'only the line sent while selected');
+  assert.equal(state.channel, null, 'and the selection ended up cleared');
+});
 await check('say posts to a channel', async () => {
   clear();
   await run('say #general get back in the mine');
@@ -504,10 +568,10 @@ await check('mood changes it everywhere', async () => {
   await run('mood sideways');
   assert.match(lastOutput(), /pick one of/);
 });
-await check('nonsense gets told off', async () => {
+await check('nonsense points at help', async () => {
   clear();
   await run('summon the ancient one');
-  assert.match(lastOutput(), /try "help"/);
+  assert.match(lastOutput(), /help/);
 });
 await check('quit hands control back rather than killing the process', async () => {
   let quit = false;
