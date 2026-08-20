@@ -8,6 +8,7 @@ import {
 import * as store from '../store.js';
 import * as memory from '../memory.js';
 import * as quota from '../quota.js';
+import { config } from '../config.js';
 import { GREETING, MOODS } from '../persona.js';
 import { notice } from '../reply.js';
 
@@ -159,7 +160,7 @@ export const data = new SlashCommandBuilder()
   .addSubcommandGroup((group) =>
     group
       .setName('dj')
-      .setDescription('Who may use the veritysong music commands')
+      .setDescription('Who may use the verity… prefix commands')
       .addSubcommand((sub) =>
         sub
           .setName('add')
@@ -177,9 +178,7 @@ export const data = new SlashCommandBuilder()
           .addRoleOption((option) => option.setName('role').setDescription('A role')),
       )
       .addSubcommand((sub) => sub.setName('list').setDescription('Who can use the music commands'))
-      .addSubcommand((sub) =>
-        sub.setName('clear').setDescription('Back to everyone being allowed'),
-      ),
+      .addSubcommand((sub) => sub.setName('clear').setDescription('Back to the owners only')),
   )
   .addSubcommand((sub) =>
     sub
@@ -285,8 +284,8 @@ export async function execute(interaction) {
       return interaction.reply(
         notice(
           sub === 'add'
-            ? `${who} can use the music commands now.`
-            : `${who} cannot use the music commands any more.`,
+            ? `${who} can use the verity… commands now.`
+            : `${who} cannot use the verity… commands any more.`,
         ),
       );
     }
@@ -294,22 +293,26 @@ export async function execute(interaction) {
     if (sub === 'clear') {
       const had = store.clearDj(guildId);
       return interaction.reply(
-        notice(had ? 'Cleared. Everyone can queue music again.' : 'Everyone could already.'),
+        notice(
+          had
+            ? 'Cleared. Back to the owners only.'
+            : 'Nobody had been added — it was already the owners only.',
+        ),
       );
     }
 
     const dj = store.listDj(guildId);
-    if (!dj.users.length && !dj.roles.length) {
-      return interaction.reply(
-        notice('**Anyone** can use the music commands. Add someone to start restricting it.'),
-      );
-    }
+    const owners = config.owners.length
+      ? config.owners.join(', ')
+      : '_nobody — VERITY_OWNERS is empty_';
     return interaction.reply(
       notice(
         [
-          '**Music commands are limited to:**',
-          dj.roles.map((id) => `<@&${id}>`).join(', '),
-          dj.users.map((id) => `<@${id}>`).join(', '),
+          '**Who can use the verity… commands**',
+          `owners (from \`.env\`): ${owners}`,
+          dj.roles.length ? `roles: ${dj.roles.map((id) => `<@&${id}>`).join(', ')}` : '',
+          dj.users.length ? `people: ${dj.users.map((id) => `<@${id}>`).join(', ')}` : '',
+          !dj.roles.length && !dj.users.length ? '_nobody else has been added_' : '',
         ]
           .filter(Boolean)
           .join('\n'),

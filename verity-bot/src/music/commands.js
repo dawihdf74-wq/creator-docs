@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
 import * as store from '../store.js';
+import { isOwner } from '../owners.js';
 import {
   classify,
   spotifyList,
@@ -29,10 +30,18 @@ export const parse = (content) => {
   return match ? { command: match[1].toLowerCase(), argument: match[2].trim() } : null;
 };
 
-/** Empty DJ list means everybody. Once anything is on it, only they can. */
+/**
+ * Who may use the verity… commands.
+ *
+ * The people in VERITY_OWNERS always can — that is the same list that gates
+ * the slash commands, and it is the default answer when nothing else has been
+ * set up. Everyone else needs to be added with /verity dj add, by user or by
+ * role. Nobody gets in by having Discord permissions alone.
+ */
 export function isDj(member, guildId) {
+  if (isOwner(member?.user ?? member, config.owners)) return true;
+
   const dj = store.listDj(guildId);
-  if (!dj.users.length && !dj.roles.length) return true;
   if (dj.users.includes(member?.id)) return true;
   return dj.roles.some((roleId) => member?.roles?.cache?.has(roleId));
 }
@@ -187,11 +196,12 @@ const HELP = [
 export async function handle({ command, argument }, message) {
   const guildId = message.guildId;
 
-  if (command === 'help' || command === 'music') return HELP;
-
+  // Everything, help included: the commands are not open to the channel.
   if (!isDj(message.member, guildId)) {
-    return 'you are not a dj. ask someone who is. :|';
+    return 'no. the music is not for you. ask someone to add you with /verity dj. :|';
   }
+
+  if (command === 'help' || command === 'music') return HELP;
 
   const voiceChannel = message.member?.voice?.channel;
 

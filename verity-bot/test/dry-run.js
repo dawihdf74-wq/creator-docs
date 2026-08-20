@@ -716,25 +716,65 @@ await check('speed is chained past what atempo allows alone', () => {
     }
   }
 });
-await check('dj list is open until someone is on it', () => {
-  const member = { id: 'u1', roles: { cache: { has: () => false } } };
-  assert.equal(isDj(member, 'guild-dj'), true, 'empty list means everyone');
-
+await check('the prefix commands are shut by default', () => {
+  const stranger = {
+    id: 'u1',
+    user: { id: 'u1', username: 'steve' },
+    roles: { cache: { has: () => false } },
+  };
+  assert.equal(isDj(stranger, 'guild-dj'), false, 'nobody gets in without being named');
+});
+await check('the owners always have them', () => {
+  for (const username of ['areajoo', 'dangcanss', 'AreaJoo']) {
+    const owner = {
+      id: 'o1',
+      user: { id: 'o1', username },
+      roles: { cache: { has: () => false } },
+    };
+    assert.equal(isDj(owner, 'guild-dj'), true, `${username} should be allowed`);
+  }
+});
+await check('access is granted by user and by role', () => {
+  const stranger = {
+    id: 'u2',
+    user: { id: 'u2', username: 'steve' },
+    roles: { cache: { has: () => false } },
+  };
   store.addDj('guild-dj', { userId: 'u2' });
-  assert.equal(isDj(member, 'guild-dj'), false, 'now it restricts');
-  assert.equal(isDj({ id: 'u2', roles: { cache: { has: () => false } } }, 'guild-dj'), true);
+  assert.equal(isDj(stranger, 'guild-dj'), true, 'named directly');
 
+  const byRole = {
+    id: 'u9',
+    user: { id: 'u9', username: 'nobody' },
+    roles: { cache: { has: (id) => id === 'r1' } },
+  };
+  assert.equal(isDj(byRole, 'guild-dj'), false, 'not until the role is added');
   store.addDj('guild-dj', { roleId: 'r1' });
+  assert.equal(isDj(byRole, 'guild-dj'), true, 'now the role carries it');
+});
+await check('access can be taken back, and never from the owners', () => {
+  const stranger = {
+    id: 'u2',
+    user: { id: 'u2', username: 'steve' },
+    roles: { cache: { has: () => false } },
+  };
+  store.removeDj('guild-dj', { userId: 'u2' });
+  assert.equal(isDj(stranger, 'guild-dj'), false);
+
+  store.clearDj('guild-dj');
+  const byRole = {
+    id: 'u9',
+    user: { id: 'u9', username: 'nobody' },
+    roles: { cache: { has: () => true } },
+  };
+  assert.equal(isDj(byRole, 'guild-dj'), false, 'clearing leaves the owners only');
   assert.equal(
-    isDj({ id: 'u9', roles: { cache: { has: (id) => id === 'r1' } } }, 'guild-dj'),
+    isDj(
+      { id: 'o1', user: { id: 'o1', username: 'areajoo' }, roles: { cache: { has: () => false } } },
+      'guild-dj',
+    ),
     true,
   );
-
-  store.removeDj('guild-dj', { userId: 'u2' });
-  assert.equal(isDj({ id: 'u2', roles: { cache: { has: () => false } } }, 'guild-dj'), false);
-
-  assert.equal(store.clearDj('guild-dj'), 1, 'the role was still listed');
-  assert.equal(isDj(member, 'guild-dj'), true, 'cleared means everyone again');
 });
 
 await check('veritysong and friends parse', () => {

@@ -198,9 +198,21 @@ Short forms work where they're obvious: `verityp`, `veritys`, `verityq`, `verity
 so does a YouTube link carrying `list=`. Spotify playlists need the API credentials below —
 the no-credentials fallback can only read single tracks.
 
-**Who's allowed.** By default anyone can queue music. `/verity dj add role:@DJ` starts
-restricting it: once anything is on the list, only those people and roles can use the
-music commands. `/verity dj list` shows it, `/verity dj clear` opens it back up.
+**Who's allowed.** Nobody, by default, except the people in `VERITY_OWNERS` — the same
+list that gates the slash commands. Everyone else gets `no. the music is not for you.`
+until you let them in:
+
+```
+/verity dj add user:@someone
+/verity dj add role:@DJ
+/verity dj list        → owners, plus anyone you've added
+/verity dj clear       → back to the owners only
+```
+
+Discord permissions don't come into it: being a server admin doesn't grant the `verity…`
+commands, only being on that list does. The owners can't be removed with `/verity dj` —
+that list lives in `.env`, so nobody can lock you out of your own bot from inside
+Discord.
 
 Those are **Discord** commands — type them in a channel, with yourself in a voice channel.
 He joins whatever voice channel you are in, announces each track in the channel you typed
