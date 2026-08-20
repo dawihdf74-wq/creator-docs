@@ -119,11 +119,95 @@ const filters = ({ speed = 1, volume = 1 }) => {
   return chain.length ? ['-af', chain.join(',')] : [];
 };
 
+/**
+ * Pulls a track list out of a Spotify embed page.
+ *
+ * The embed page is public, needs no key, and carries its data as JSON in the
+ * markup. It is also Spotify's own front-end, so the shape moves when they
+ * redesign it — hence three ways of reading it, ending in a plain scan for
+ * title/subtitle pairs. Credentials are steadier; this is for when you have
+ * none.
+ */
+export function parseEmbedTracks(html) {
+  const text = String(html ?? '');
+
+  const readers = [
+    // Current shape: a __NEXT_DATA__ script with the entity's track list.
+    () => {
+      const match = text.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+      if (!match) return null;
+      const data = JSON.parse(match[1]);
+      const entity = data?.props?.pageProps?.state?.data?.entity ?? data?.props?.pageProps?.entity;
+      return entity?.trackList ?? entity?.trackList?.items ?? null;
+    },
+    // Older shape: an inline Spotify.Entity assignment.
+    () => {
+      const match = text.match(/Spotify\.Entity\s*=\s*(\{[\s\S]*?\});/);
+      if (!match) return null;
+      const entity = JSON.parse(match[1]);
+      return (entity?.tracks?.items ?? []).map((item) => ({
+        title: item?.track?.name ?? item?.name,
+        subtitle: (item?.track?.artists ?? item?.artists ?? []).map((a) => a.name).join(', '),
+      }));
+    },
+    // Last resort: the pairs as they appear, whatever wraps them.
+    () =>
+      [...text.matchAll(/"title":"((?:[^"\\]|\\.)*)","subtitle":"((?:[^"\\]|\\.)*)"/g)].map(
+        (match) => ({ title: JSON.parse(`"${match[1]}"`), subtitle: JSON.parse(`"${match[2]}"`) }),
+      ),
+  ];
+
+  for (const read of readers) {
+    let rows;
+    try {
+      rows = read();
+    } catch {
+      continue; // a shape that does not parse is simply not this page's shape
+    }
+
+    const tracks = (rows ?? [])
+      .filter((row) => row?.title)
+      .map((row) => ({
+        title: [row.subtitle, row.title].filter(Boolean).join(' - '),
+        search: `${row.subtitle ?? ''} ${row.title}`.trim(),
+      }));
+
+    if (tracks.length) return tracks;
+  }
+
+  return [];
+}
+
+/** A playlist or album without any credentials at all. */
+async function spotifyListNoAuth({ type, id }) {
+  const response = await fetch(`https://open.spotify.com/embed/${type}/${id}`, {
+    headers: {
+      // The embed page serves a stripped shell to unrecognised clients.
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36',
+      'Accept-Language': 'en',
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) throw new Error(`spotify answered ${response.status} for that ${type}.`);
+  return parseEmbedTracks(await response.text());
+}
+
 /** Every track on a Spotify playlist or album, in order. */
 export async function spotifyList({ type, id }) {
+  // No credentials: read the public embed page instead. Less reliable, but
+  // it needs nothing from you.
   if (!config.spotify.id || !config.spotify.secret) {
+    const scraped = await spotifyListNoAuth({ type, id }).catch((error) => {
+      console.error('[verity] spotify embed read failed:', error.message);
+      return [];
+    });
+    if (scraped.length) return scraped;
+
     throw new Error(
-      'playlists need spotify credentials. VERITY_SPOTIFY_ID and VERITY_SPOTIFY_SECRET in .env. :|',
+      `i could not read that ${type} without credentials. spotify changes that page whenever it likes. ` +
+        'put VERITY_SPOTIFY_ID and VERITY_SPOTIFY_SECRET in .env — they are free, no premium needed. :|',
     );
   }
 

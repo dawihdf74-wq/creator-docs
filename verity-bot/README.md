@@ -194,9 +194,17 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 Short forms work where they're obvious: `verityp`, `veritys`, `verityq`, `verityvol`,
 `veritydc`.
 
-**Playlists.** A Spotify playlist or album link queues every track on it (up to 50), and
-so does a YouTube link carrying `list=`. Spotify playlists need the API credentials below —
-the no-credentials fallback can only read single tracks.
+**Playlists.** A YouTube link carrying `list=` queues the whole playlist, needing nothing
+but yt-dlp. A Spotify playlist or album link queues every track on it too, by either route:
+
+- **With credentials** (`VERITY_SPOTIFY_ID` / `VERITY_SPOTIFY_SECRET`) — the proper API,
+  50 tracks a page, steady. They're **free**, and have nothing to do with Premium: any
+  Spotify account can make an app at
+  [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) in a couple
+  of minutes, no card involved.
+- **Without them** — he reads Spotify's public embed page instead. No key, no signup, but
+  it is Spotify's own front-end and the shape shifts when they redesign it, so this is the
+  one that will break some day. He says so plainly if it does.
 
 **Who's allowed.** Nobody, by default, except the people in `VERITY_OWNERS` — the same
 list that gates the slash commands. Everyone else gets `no. the music is not for you.`

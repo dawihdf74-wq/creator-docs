@@ -26,7 +26,7 @@ import { looksLikeQuestion } from '../src/question.js';
 import { match as matchAnswer, fill } from '../src/faq.js';
 import { createConsole } from '../src/console.js';
 import { parse as parseMusic, trackFor, isDj } from '../src/music/commands.js';
-import { classify, tempoFilter } from '../src/music/resolve.js';
+import { classify, tempoFilter, parseEmbedTracks } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
@@ -678,6 +678,61 @@ await check('a direct link becomes a playable track', async () => {
   assert.equal(track.title, 'Some Song Name', 'tidies the filename into a title');
   assert.equal(track.requestedBy, 'dave');
   assert.equal(typeof track.open, 'function');
+});
+
+console.log('\nmusic: reading a spotify list without credentials');
+await check('reads the current embed shape', () => {
+  const payload = {
+    props: {
+      pageProps: {
+        state: {
+          data: {
+            entity: {
+              trackList: [
+                { title: 'First Song', subtitle: 'Some Band' },
+                { title: 'Second Song', subtitle: 'Another Band' },
+              ],
+            },
+          },
+        },
+      },
+    },
+  };
+  const html = `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(payload)}</script></html>`;
+  const tracks = parseEmbedTracks(html);
+  assert.equal(tracks.length, 2);
+  assert.equal(
+    tracks[0].title,
+    'Some Band - First Song',
+    'artist and title, the way a queue reads',
+  );
+  assert.equal(tracks[0].search, 'Some Band First Song', 'and a sensible thing to search for');
+});
+await check('reads the older embed shape too', () => {
+  const entity = {
+    tracks: {
+      items: [{ track: { name: 'Old Song', artists: [{ name: 'Old Band' }] } }],
+    },
+  };
+  const html = `<script>Spotify.Entity = ${JSON.stringify(entity)};</script>`;
+  assert.equal(parseEmbedTracks(html)[0].title, 'Old Band - Old Song');
+});
+await check('falls back to scanning when neither shape fits', () => {
+  const html = 'garbage {"title":"Loose Song","subtitle":"Loose Band"} more garbage';
+  assert.equal(parseEmbedTracks(html)[0].title, 'Loose Band - Loose Song');
+});
+await check('a page with nothing readable returns nothing, not junk', () => {
+  for (const html of [
+    '',
+    '<html><body>no</body></html>',
+    '<script id="__NEXT_DATA__">not json</script>',
+  ]) {
+    assert.deepEqual(parseEmbedTracks(html), [], `should find nothing in: ${html.slice(0, 30)}`);
+  }
+});
+await check('escaped characters survive the scan', () => {
+  const html = '{"title":"Song \\"Quoted\\"","subtitle":"Band"}';
+  assert.equal(parseEmbedTracks(html)[0].title, 'Band - Song "Quoted"');
 });
 
 console.log('\nmusic: commands');
