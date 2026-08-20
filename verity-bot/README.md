@@ -235,6 +235,13 @@ verityjump 4          → skip straight to it, dropping 1–3
 A speed set that way belongs to the track, not the session: the rest of the queue plays
 normally, and `veritynp` shows the `2x` badge while it's on.
 
+**When a track won't play.** Links resolved ahead of time can go stale before their turn
+comes round, and some tracks simply refuse — age-gated, region-locked, taken down. A track
+that ends having produced no audio is treated as never having played: its stale link is
+thrown away and it's looked up again, and if that fails too he says so in the channel and
+moves straight to the next song. A dead track is never looped back round, and skipping
+early is never mistaken for a failure.
+
 **Staying in the channel.** Discord drops voice connections constantly — websocket
 resumes, region moves, a UDP blip — and almost none of it means anything. Verity rejoins
 through those, backing off a little further each time, and only gives up after five failed

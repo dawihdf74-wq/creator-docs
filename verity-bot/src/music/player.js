@@ -54,6 +54,13 @@ export function resolveBitrate(voiceChannel) {
   return Math.min(510_000, Math.max(8_000, Math.round(wanted)));
 }
 
+/**
+ * A track that ends having produced less than this much audio never really
+ * played — the source was dead, the link had expired, or the resolver came
+ * back empty.
+ */
+const SILENT_MS = 1500;
+
 /** Leave on his own after this long doing nothing, rather than idling forever. */
 const IDLE_MS = 5 * 60 * 1000;
 
@@ -75,6 +82,7 @@ function session(guildId) {
     bitrate: 64_000,
     loop: 'off', // off | track | queue
     restarting: false,
+    skipping: false,
     lastPlayed: null,
     history: [],
     idleTimer: null,
@@ -86,10 +94,33 @@ function session(guildId) {
     if (existing.restarting) return;
 
     const finished = existing.current?.track;
+    const played = existing.resource?.playbackDuration ?? 0;
+    const onPurpose = existing.skipping;
+
+    existing.skipping = false;
     existing.current?.kill?.();
     existing.current = null;
     existing.resource = null;
     existing.seekBase = 0;
+
+    // Ended without making a sound: it never played, so do not treat it as
+    // finished — and never loop it, or a dead track loops forever.
+    if (finished && !onPurpose && played < SILENT_MS) {
+      // A url resolved ahead of time can have expired while it waited in the
+      // queue. Throw it away and let the resolver look the track up again.
+      if (finished.direct && !finished.retried) {
+        finished.direct = null;
+        finished.prepared = false;
+        finished.retried = true;
+        existing.onEvent({ type: 'retrying', track: finished });
+        start(existing, finished);
+        return;
+      }
+
+      existing.onEvent({ type: 'failed', track: finished });
+      advance(existing); // straight on to the next one
+      return;
+    }
 
     if (finished && existing.loop === 'track') existing.queue.unshift(finished);
     else if (finished && existing.loop === 'queue') existing.queue.push(finished);
@@ -204,11 +235,18 @@ export async function handleDisconnect(connection, disconnect, options) {
     disconnect?.closeCode === 4014
   ) {
     try {
-      await (awaitReconnect ?? ((c) => entersState(c, VoiceConnectionStatus.Connecting, 5_000)))(
+      await (awaitReconnect ?? ((c) => entersState(c, VoiceConnectionStatus.Connecting, 15_000)))(
         connection,
       );
       return 'moved';
     } catch {
+      // A dropped gateway session looks exactly like being removed, and it
+      // can take longer than this to come back. One rejoin tells them apart:
+      // a real removal fails it, a blip does not.
+      if ((connection.rejoinAttempts ?? 0) < 1) {
+        connection.rejoin();
+        return 'rejoining';
+      }
       giveUp('removed from the channel');
       return 'gave up';
     }
@@ -300,7 +338,10 @@ export function skip(guildId) {
   const skipped = state?.current?.track ?? null;
   // Skipping past a looping track should not loop it back round again.
   const loop = state?.loop;
-  if (state) state.loop = 'off';
+  if (state) {
+    state.loop = 'off';
+    state.skipping = true;
+  }
   state?.player.stop(true);
   if (state) state.loop = loop;
   return skipped;
@@ -312,6 +353,7 @@ export function stop(guildId) {
   const dropped = state.queue.length;
   state.queue.length = 0;
   state.loop = 'off';
+  state.skipping = true;
   state.player.stop(true);
   return dropped;
 }
@@ -415,6 +457,7 @@ export function jumpTo(guildId, position) {
   const track = queue[0];
   const loop = state.loop;
   state.loop = 'off'; // do not loop the track we are jumping away from
+  state.skipping = true;
   state.player.stop(true);
   state.loop = loop;
   return { track, skipped };

@@ -827,6 +827,22 @@ function events(message) {
         })
         .catch(() => {});
     }
+    if (event.type === 'failed') {
+      message.channel
+        .send({
+          embeds: [
+            embeds
+              .trouble(`**${event.track.title}** would not play. moving on. :|`)
+              .setAuthor({ name: 'Skipped' }),
+          ],
+        })
+        .catch(() => {});
+    }
+    if (event.type === 'retrying') {
+      // Quiet on purpose: a retry usually works, and a message per attempt is
+      // noise in a channel that is meant to be listening to music.
+      console.log(`[verity] ${event.track.title}: link had gone stale, looking it up again`);
+    }
     if (event.type === 'empty') {
       maybeAutoplay(message, event).catch(() => {});
     }

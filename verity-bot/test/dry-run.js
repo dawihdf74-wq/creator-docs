@@ -933,6 +933,19 @@ const tone = execFileSync(
 );
 
 const { Readable } = await import('node:stream');
+
+/**
+ * Ends a track the way a real one ends: having actually played. Stopping the
+ * player outright looks identical to a source that produced nothing, which
+ * the player now treats as a failure rather than a finish.
+ */
+// eslint-disable-next-line no-unused-vars
+const finishTrack = async (guildId) => {
+  const session = musicPlayer.__sessions.get(guildId);
+  if (session?.resource) session.resource.playbackDuration = 30_000;
+  session?.player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+};
 let killed = 0;
 const fakeTrack = (title) => ({
   title,
@@ -1010,9 +1023,7 @@ await check('looping a track puts it back in front when it ends', async () => {
   musicPlayer.enqueue('guild-loop', fakeTrack('on repeat'));
   musicPlayer.setLoop('guild-loop', 'track');
 
-  // Ending the track naturally is what the Idle handler reacts to.
-  musicPlayer.__sessions.get('guild-loop').player.stop(true);
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await finishTrack('guild-loop');
   assert.equal(musicPlayer.nowPlaying('guild-loop')?.title, 'on repeat', 'it came back round');
 
   musicPlayer.setLoop('guild-loop', 'off');
@@ -1137,6 +1148,90 @@ await check('a queued track carries what it needs to be saved', async () => {
   });
 });
 
+await check('a track that makes no sound is retried, then skipped', async () => {
+  musicPlayer.__sessions.delete('guild-dead');
+  const events = [];
+
+  // A track holding a url resolved a while ago, which has since expired: it
+  // opens fine and produces nothing.
+  const dead = {
+    title: 'expired link',
+    requestedBy: 'dave',
+    seekable: true,
+    direct: 'https://example.com/expired',
+    open: () => ({ stream: Readable.from([]), kill: () => {} }),
+  };
+
+  musicPlayer.enqueue('guild-dead', dead);
+  musicPlayer.__sessions.get('guild-dead').onEvent = (event) => events.push(event);
+  musicPlayer.enqueue('guild-dead', fakeTrack('the next one'));
+
+  // The track ends having played nothing. (Without a voice connection the
+  // player never drains a stream on its own, so the ending is driven here;
+  // what is under test is the decision, not @discordjs/voice's buffering.)
+  const died = async (guildId) => {
+    const session = musicPlayer.__sessions.get(guildId);
+    if (session?.resource) session.resource.playbackDuration = 0;
+    session?.player.stop(true);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  };
+
+  await died('guild-dead'); // first attempt: stale url thrown away, retried
+  await died('guild-dead'); // second: given up on, queue moves along
+
+  assert.ok(
+    events.some((event) => event.type === 'retrying'),
+    'the stale url is thrown away and the track looked up again',
+  );
+  assert.equal(dead.direct, null, 'so the next attempt resolves it fresh');
+  assert.ok(
+    events.some((event) => event.type === 'failed'),
+    'and when that fails too, the track is given up on',
+  );
+  assert.equal(
+    musicPlayer.nowPlaying('guild-dead')?.title,
+    'the next one',
+    'the queue carries on by itself',
+  );
+  musicPlayer.leave('guild-dead');
+});
+await check('a dead track is never looped back round', async () => {
+  musicPlayer.__sessions.delete('guild-dead-loop');
+  const dead = {
+    title: 'silent',
+    requestedBy: 'dave',
+    seekable: false,
+    open: () => ({ stream: Readable.from([]), kill: () => {} }),
+  };
+  musicPlayer.enqueue('guild-dead-loop', dead);
+  musicPlayer.setLoop('guild-dead-loop', 'track');
+
+  const session = musicPlayer.__sessions.get('guild-dead-loop');
+  if (session?.resource) session.resource.playbackDuration = 0;
+  session?.player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(musicPlayer.queued('guild-dead-loop').length, 0, 'or it would loop forever');
+  assert.equal(musicPlayer.nowPlaying('guild-dead-loop'), null);
+  musicPlayer.leave('guild-dead-loop');
+});
+await check('a skip is not mistaken for a broken track', async () => {
+  musicPlayer.__sessions.delete('guild-skip-clean');
+  const events = [];
+  musicPlayer.enqueue('guild-skip-clean', fakeTrack('first'));
+  musicPlayer.__sessions.get('guild-skip-clean').onEvent = (event) => events.push(event);
+  musicPlayer.enqueue('guild-skip-clean', fakeTrack('second'));
+
+  musicPlayer.skip('guild-skip-clean');
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  assert.ok(
+    !events.some((event) => event.type === 'failed'),
+    'skipping early is deliberate, not a failure',
+  );
+  assert.equal(musicPlayer.nowPlaying('guild-skip-clean')?.title, 'second');
+  musicPlayer.leave('guild-skip-clean');
+});
+
 await check('stop empties the queue', () => {
   const dropped = musicPlayer.stop('guild-music');
   assert.equal(dropped, 1, 'third song was still waiting');
@@ -1222,8 +1317,7 @@ await check('what played is remembered, newest first', async () => {
   musicPlayer.__sessions.get('guild-history').onEvent = (event) => events.push(event);
   musicPlayer.enqueue('guild-history', fakeTrack('second'));
 
-  musicPlayer.__sessions.get('guild-history').player.stop(true);
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await finishTrack('guild-history');
 
   const heard = musicPlayer.history('guild-history').map((track) => track.title);
   assert.deepEqual(heard, ['second', 'first'], 'most recent at the front');
@@ -1236,8 +1330,7 @@ await check('running dry reports what it ran dry after', async () => {
   musicPlayer.enqueue('guild-empty', fakeTrack('only one'));
   musicPlayer.__sessions.get('guild-empty').onEvent = (event) => events.push(event);
 
-  musicPlayer.__sessions.get('guild-empty').player.stop(true);
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await finishTrack('guild-empty');
 
   const empty = events.find((event) => event.type === 'empty');
   assert.ok(empty, 'the queue announces that it is empty');
@@ -1293,8 +1386,28 @@ await check('being moved between channels is not a reason to leave', async () =>
   assert.equal(outcome, 'moved');
   assert.equal(gaveUp, null, 'he follows rather than quitting');
 });
-await check('being removed from the channel is', async () => {
+await check('a lost gateway session gets one rejoin before he believes it', async () => {
+  // A dropped session and a real removal both arrive as a 4014 that does not
+  // come back, so one rejoin is what tells them apart.
   const connection = fakeConnection();
+  let gaveUp = null;
+  const outcome = await handleDisconnect(
+    connection,
+    { reason: VoiceConnectionDisconnectReason.WebSocketClose, closeCode: 4014 },
+    {
+      giveUp: (why) => (gaveUp = why),
+      wait: instantly,
+      awaitReconnect: async () => {
+        throw new Error('never came back');
+      },
+    },
+  );
+  assert.equal(outcome, 'rejoining', 'he tries once');
+  assert.equal(connection.rejoined, 1);
+  assert.equal(gaveUp, null);
+});
+await check('a rejoin that fails too means he really was removed', async () => {
+  const connection = fakeConnection(1); // the rejoin above already happened
   let gaveUp = null;
   const outcome = await handleDisconnect(
     connection,
@@ -1451,8 +1564,7 @@ await check('the next track is resolved while this one plays', async () => {
   assert.equal(prepared, 0, 'nothing to prefetch until something is playing ahead of it');
 
   // Starting the first track is what triggers the lookup for the second.
-  musicPlayer.__sessions.get('guild-prefetch').player.stop(true);
-  await new Promise((resolve) => setTimeout(resolve, 150));
+  await finishTrack('guild-prefetch');
   musicPlayer.leave('guild-prefetch');
 });
 await check('a failed prefetch does not lose the track', async () => {
@@ -1468,8 +1580,7 @@ await check('a failed prefetch does not lose the track', async () => {
   };
   musicPlayer.enqueue('guild-prefetch-fail', fakeTrack('first'));
   musicPlayer.enqueue('guild-prefetch-fail', broken);
-  musicPlayer.__sessions.get('guild-prefetch-fail').player.stop(true);
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await finishTrack('guild-prefetch-fail');
   assert.equal(
     musicPlayer.nowPlaying('guild-prefetch-fail')?.title,
     'awkward',
