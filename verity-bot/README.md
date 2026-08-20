@@ -193,6 +193,8 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `veritysaveplaylist <name>` | Keep the current queue under that name |
 | `verityplaylist <name>` | Put a saved one back. `verityplaylist saved` lists them |
 | `veritydeleteplaylist <name>` | Forget one |
+| `verityremoveplaylistall` | Forget all of them, and say which went. Short: `verityrpa` |
+| `veritytrigger add <phrase> = <link>` | Say the phrase, he puts that song on. `veritytrigger list` |
 | `verityshuffle` · `verityclear` · `verityremove <n>` | Reorder the queue |
 | `verityloop track\|queue\|off` | Repeat one, repeat everything, or stop |
 | `verityspeed 2` | Double speed. Anything from 0.25 to 4 |
@@ -231,6 +233,16 @@ verityjump 4          → skip straight to it, dropping 1–3
 
 A speed set that way belongs to the track, not the session: the rest of the queue plays
 normally, and `veritynp` shows the `2x` badge while it's on.
+
+**Phrases that put a song on.** Some songs get asked for the same way every time, so
+`veritytrigger add dada put on that misery = <link>` makes the phrase itself the command —
+say it anywhere in a message and the song goes on. `veritytrigger list` shows them,
+`veritytrigger remove <n>` drops one.
+
+Unlike the typed commands, phrases work for **anyone in the server**: a phrase only exists
+because a DJ added it, and a phrase nobody but a DJ can say is not much of a phrase. The
+speaker has to be in a voice channel, and each phrase has a 30 second cooldown so it can't
+be spammed. He ships knowing one already.
 
 **Saving a playlist.** Hand it a link and he keeps that playlist, without playing a note:
 

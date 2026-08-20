@@ -9,6 +9,18 @@ import { config } from './config.js';
 
 const FILE = path.join(config.dataDir, 'guilds.json');
 
+/**
+ * Phrases that put a song on. Shipped with one because someone asked for it;
+ * everything else is added per server with `veritytrigger add`.
+ */
+const DEFAULT_TRIGGERS = [
+  {
+    phrase: 'dada put on that misery',
+    url: 'https://open.spotify.com/track/6De8sirPzVyAoBDlQpcutY',
+    label: 'misery — pupies',
+  },
+];
+
 let state = { guilds: {} };
 let writeTimer = null;
 
@@ -54,6 +66,7 @@ export function getGuild(guildId) {
       faq: [],
       dj: { users: [], roles: [] },
       playlists: {},
+      songTriggers: [...DEFAULT_TRIGGERS],
     };
     save();
   }
@@ -65,6 +78,8 @@ export function getGuild(guildId) {
   guild.dj.users ??= [];
   guild.dj.roles ??= [];
   guild.playlists ??= {};
+  // A server saved before triggers existed gets the shipped one too.
+  guild.songTriggers ??= [...DEFAULT_TRIGGERS];
   guild.channels ??= {};
   return guild;
 }
@@ -190,7 +205,8 @@ export function savePlaylist(guildId, name, entries, by) {
   return entries.length;
 }
 
-export const getPlaylist = (guildId, name) => getGuild(guildId).playlists[String(name).toLowerCase()] ?? null;
+export const getPlaylist = (guildId, name) =>
+  getGuild(guildId).playlists[String(name).toLowerCase()] ?? null;
 export const listPlaylists = (guildId) => Object.values(getGuild(guildId).playlists);
 
 export function deletePlaylist(guildId, name) {
@@ -200,6 +216,33 @@ export function deletePlaylist(guildId, name) {
   delete playlists[key];
   save();
   return existed;
+}
+
+/** Wipes every saved playlist, returning the names so you know what went. */
+export function clearPlaylists(guildId) {
+  const guild = getGuild(guildId);
+  const names = Object.values(guild.playlists).map((entry) => entry.name);
+  guild.playlists = {};
+  save();
+  return names;
+}
+
+/** Say the phrase, get the song. */
+export function addTrigger(guildId, phrase, url, label) {
+  const triggers = getGuild(guildId).songTriggers;
+  triggers.push({ phrase, url, label: label ?? url });
+  save();
+  return triggers.length;
+}
+
+export const listTriggers = (guildId) => getGuild(guildId).songTriggers;
+
+export function removeTrigger(guildId, index) {
+  const triggers = getGuild(guildId).songTriggers;
+  if (index < 0 || index >= triggers.length) return null;
+  const [removed] = triggers.splice(index, 1);
+  save();
+  return removed;
 }
 
 /** Flush pending writes on shutdown. */

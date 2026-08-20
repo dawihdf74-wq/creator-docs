@@ -13,7 +13,7 @@ import { mentionsName } from './addressed.js';
 import { looksLikeQuestion } from './question.js';
 import { match as matchAnswer, fill } from './faq.js';
 import { startConsole } from './console.js';
-import { parse as parseMusic, handle as handleMusic, isDj } from './music/commands.js';
+import { parse as parseMusic, handle as handleMusic, isDj, playTrigger } from './music/commands.js';
 import { buildPlaylistView, parseId } from './music/view.js';
 import * as musicPlayer from './music/player.js';
 import { leave as leaveVoice } from './music/player.js';
@@ -225,6 +225,27 @@ client.on(Events.MessageCreate, async (message) => {
   if (settings.questionsOnly && !looksLikeQuestion(message.content)) return;
 
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
+  // Phrases that put a song on. Checked before the canned answers, since a
+  // phrase is a deliberate thing someone set up.
+  const trigger = message.guildId
+    ? matchAnswer(
+        store
+          .listTriggers(message.guildId)
+          .map((entry) => ({ ...entry, triggers: [entry.phrase] })),
+        message.content,
+      )
+    : null;
+
+  if (trigger && shouldSay(message.channelId, `trigger:${trigger.phrase}`, 30_000)) {
+    try {
+      const reply = await playTrigger(trigger, message);
+      if (reply) await message.reply({ ...reply, allowedMentions: { repliedUser: false } });
+    } catch (error) {
+      console.error('[verity] trigger:', error.message);
+    }
+    return;
+  }
+
   // A canned answer costs nothing and arrives instantly, so it is checked
   // before the throttle, the quota and the model.
   const canned = matchAnswer(store.listAnswers(message.guildId ?? 'dm'), message.content);

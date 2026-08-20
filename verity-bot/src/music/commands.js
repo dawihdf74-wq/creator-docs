@@ -15,6 +15,7 @@ import {
 } from './resolve.js';
 import * as player from './player.js';
 import { buildPlaylistView } from './view.js';
+import * as embeds from './embeds.js';
 
 const run = promisify(execFile);
 
@@ -48,6 +49,12 @@ const ALIASES = {
   deleteplaylist: 'delete',
   unsave: 'delete',
   dp: 'delete',
+  removeplaylistall: 'wipe',
+  clearplaylists: 'wipe',
+  rpa: 'wipe',
+  trigger: 'trigger',
+  triggers: 'trigger',
+  tr: 'trigger',
   // choosing what is next
   next: 'next',
   playnext: 'next',
@@ -426,7 +433,7 @@ export async function handle({ command, argument }, message) {
       );
       await player.join(voiceChannel, events(message));
       const { added, startedPlaying } = player.enqueueAll(guildId, rebuilt);
-      return `**${saved.name}** is back — ${added} tracks${startedPlaying ? '' : ', behind what is already on'}.`;
+      return { embeds: [embeds.queuedMany(saved.name, added, startedPlaying)] };
     }
 
     case 'save': {
@@ -457,7 +464,7 @@ export async function handle({ command, argument }, message) {
           entries,
           message.member?.displayName ?? message.author.username,
         );
-        return `kept **${name}** — ${entries.length} tracks. \`verityplaylist ${name}\` puts it on. i will not forget it. :)`;
+        return { embeds: [embeds.saved(name, entries.length, 'straight off the link. :)')] };
       }
 
       const name = asked.slice(0, 40);
@@ -480,7 +487,66 @@ export async function handle({ command, argument }, message) {
         entries,
         message.member?.displayName ?? message.author.username,
       );
-      return `kept **${name}** — ${entries.length} tracks. \`verityplaylist ${name}\` brings it back. i will not forget it. :)`;
+      return {
+        embeds: [
+          embeds.saved(
+            name,
+            entries.length,
+            'taken off what was playing. i will not forget it. :)',
+          ),
+        ],
+      };
+    }
+
+    case 'wipe': {
+      const names = store.clearPlaylists(guildId);
+      if (!names.length) return 'there were none saved. nothing to take.';
+      return {
+        embeds: [
+          embeds
+            .trouble(
+              [
+                `**${names.length}** saved playlist${names.length === 1 ? '' : 's'} gone:`,
+                names.map((name) => `\`${name}\``).join(', '),
+              ].join('\n'),
+            )
+            .setAuthor({ name: 'All playlists removed' })
+            .setFooter({ text: 'i remember every one of them anyway. :)' }),
+        ],
+      };
+    }
+
+    case 'trigger': {
+      const [action, ...rest] = argument.split(/\s+/);
+      const tail = rest.join(' ');
+
+      if (!action || action === 'list') {
+        const triggers = store.listTriggers(guildId);
+        if (!triggers.length) return 'no phrases set. `veritytrigger add <phrase> = <link>`.';
+        return [
+          '**say one of these out loud and he puts it on**',
+          ...triggers.map((entry, index) => `\`${index}\` "${entry.phrase}" → ${entry.label}`),
+        ].join('\n');
+      }
+
+      if (action === 'add') {
+        const [phrase, ...linkParts] = tail.split('=');
+        const url = linkParts.join('=').trim();
+        if (!phrase.trim() || !url) {
+          return 'like this: `veritytrigger add dada put on that misery = <link>`';
+        }
+        store.addTrigger(guildId, phrase.trim(), url, url);
+        return `say **${phrase.trim()}** and it goes on. i will be listening for it. always. :)`;
+      }
+
+      if (action === 'remove' || action === 'rm') {
+        const removed = store.removeTrigger(guildId, Number(tail));
+        return removed
+          ? `**${removed.phrase}** does not do anything any more.`
+          : 'nothing at that number. `veritytrigger list` shows them.';
+      }
+
+      return '`veritytrigger list` · `veritytrigger add <phrase> = <link>` · `veritytrigger remove <n>`';
     }
 
     case 'delete': {
@@ -628,29 +694,68 @@ export async function handle({ command, argument }, message) {
 
   if (tracks.length > 1) {
     const { added, startedPlaying } = player.enqueueAll(guildId, tracks);
-    return `queued **${label}** — ${added} tracks${startedPlaying ? '' : ', behind what is already on'}.`;
+    return { embeds: [embeds.queuedMany(label, added, startedPlaying)] };
   }
 
   const { position } = player.enqueue(guildId, tracks[0]);
   // Position 0 started immediately, and the playing event announces that.
   if (position === 0) return null;
-  return `**${label}** — number ${position}. ${pick(['wait your turn.', 'it will come round.', 'patience, friend. :)'])}`;
+  return {
+    embeds: [
+      embeds.queued(
+        label,
+        position,
+        pick(['wait your turn.', 'it will come round.', 'patience, friend. :)']),
+      ),
+    ],
+  };
 }
 
-const rate = (track) => (track?.speed ? ` at ${track.speed}x` : '');
+/**
+ * A phrase someone set up put a song on.
+ *
+ * Deliberately outside the DJ check: a phrase only exists because someone who
+ * *is* a DJ added it, and the point of one is that anybody can say it.
+ */
+export async function playTrigger(trigger, message) {
+  const voiceChannel = message.member?.voice?.channel;
+  if (!voiceChannel) return null; // no room to play into, so let it pass
+
+  const permissions = voiceChannel.permissionsFor(message.client.user);
+  if (!permissions?.has('Connect') || !permissions?.has('Speak')) return null;
+
+  const { tracks, label } = await tracksFor(
+    trigger.url,
+    message.member?.displayName ?? message.author.username,
+  );
+  await player.join(voiceChannel, events(message));
+
+  if (tracks.length > 1) {
+    const { added, startedPlaying } = player.enqueueAll(message.guildId, tracks);
+    return { embeds: [embeds.queuedMany(label, added, startedPlaying)] };
+  }
+
+  const { position } = player.enqueue(message.guildId, tracks[0]);
+  return position === 0 ? null : { embeds: [embeds.queued(label, position, 'you asked for it.')] };
+}
 
 /** Playback events talk back to the channel the command came from. */
 function events(message) {
   return (event) => {
     if (event.type === 'playing') {
       message.channel
-        .send(
-          pick([
-            `now playing **${event.track.title}**${rate(event.track)}, because ${event.track.requestedBy} insisted. :|`,
-            `**${event.track.title}**${rate(event.track)}. ${event.track.requestedBy} chose this. remember that. :|`,
-            `on now: **${event.track.title}**${rate(event.track)}. i am listening too. always. :D`,
-          ]),
-        )
+        .send({
+          embeds: [
+            embeds.nowPlaying(
+              event.track,
+              pick([
+                `${event.track.requestedBy} insisted. :|`,
+                'someone chose this. remember that. :|',
+                'i am listening too. always. :D',
+              ]),
+            ),
+          ],
+        })
         .catch(() => {});
     }
     if (event.type === 'error') {

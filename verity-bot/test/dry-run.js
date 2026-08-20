@@ -1145,6 +1145,61 @@ await check('leave tears the session down', () => {
   assert.equal(musicPlayer.leave('guild-music'), false, 'and says so if he was never there');
 });
 
+console.log('\nmusic: phrases and housekeeping');
+await check('the phrase he ships with is there from the start', () => {
+  const triggers = store.listTriggers('guild-trigger');
+  assert.equal(triggers.length, 1, 'one, out of the box');
+  assert.equal(triggers[0].phrase, 'dada put on that misery');
+  assert.match(triggers[0].url, /open\.spotify\.com\/track\//);
+});
+await check('saying it anywhere in a message counts', () => {
+  const entries = store
+    .listTriggers('guild-trigger')
+    .map((entry) => ({ ...entry, triggers: [entry.phrase] }));
+
+  for (const line of [
+    'dada put on that misery',
+    'DADA PUT ON THAT MISERY please',
+    'oi dada put on that misery again lol',
+  ]) {
+    assert.ok(matchAnswer(entries, line), `should trigger: ${line}`);
+  }
+  assert.equal(matchAnswer(entries, 'what a miserable day'), null, 'and ordinary talk does not');
+});
+await check('phrases can be added and taken away', () => {
+  store.addTrigger('guild-trigger', 'play the thing', 'https://x.com/a.mp3', 'the thing');
+  assert.equal(store.listTriggers('guild-trigger').length, 2);
+
+  const entries = store
+    .listTriggers('guild-trigger')
+    .map((entry) => ({ ...entry, triggers: [entry.phrase] }));
+  assert.equal(matchAnswer(entries, 'go on, play the thing').label, 'the thing');
+
+  assert.equal(store.removeTrigger('guild-trigger', 1).phrase, 'play the thing');
+  assert.equal(store.listTriggers('guild-trigger').length, 1);
+  assert.equal(store.removeTrigger('guild-trigger', 9), null, 'a bad number is refused');
+});
+await check('removing every playlist says which ones went', () => {
+  store.savePlaylist(
+    'guild-wipe',
+    'friday',
+    [{ title: 'a', meta: { kind: 'direct', target: 'x' } }],
+    'dave',
+  );
+  store.savePlaylist(
+    'guild-wipe',
+    'sunday',
+    [{ title: 'b', meta: { kind: 'direct', target: 'y' } }],
+    'dave',
+  );
+  assert.equal(store.listPlaylists('guild-wipe').length, 2);
+
+  const names = store.clearPlaylists('guild-wipe');
+  assert.deepEqual(names.sort(), ['friday', 'sunday'], 'so you know what you lost');
+  assert.equal(store.listPlaylists('guild-wipe').length, 0);
+  assert.deepEqual(store.clearPlaylists('guild-wipe'), [], 'and again is harmless');
+});
+
 console.log('\nmusic: the clickable panel');
 // Assert against toJSON(), which is exactly what Discord receives.
 const panel = (guildId, page) => {
