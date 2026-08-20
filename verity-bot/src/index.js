@@ -13,6 +13,8 @@ import { mentionsName } from './addressed.js';
 import { looksLikeQuestion } from './question.js';
 import { match as matchAnswer, fill } from './faq.js';
 import { startConsole } from './console.js';
+import { parse as parseMusic, handle as handleMusic } from './music/commands.js';
+import { leave as leaveVoice } from './music/player.js';
 import { isOwner } from './owners.js';
 import { notice } from './reply.js';
 import { inCharacterError, REFUSAL_LINE, speak } from './ai.js';
@@ -74,6 +76,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent, // privileged — enable it in the Developer Portal
     GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildVoiceStates, // needed to see which voice channel you are in
   ],
   partials: [Partials.Channel, Partials.Message], // needed to see DMs
 });
@@ -127,6 +130,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || message.system) return;
   if (!message.content?.trim()) return;
+
+  // Music commands work anywhere he can see, not just his channels, and
+  // never touch the model or anyone's question budget.
+  const musicCommand = message.guildId && parseMusic(message.content);
+  if (musicCommand) {
+    try {
+      const reply = await handleMusic(musicCommand, message);
+      if (reply) await message.reply({ content: reply, allowedMentions: { repliedUser: false } });
+    } catch (error) {
+      console.error('[verity] music:', error);
+      await message
+        .reply({ content: error.message, allowedMentions: { repliedUser: false } })
+        .catch(() => {});
+    }
+    return;
+  }
 
   const isDm = !message.guildId;
   const settings = isDm ? config.defaults : store.getSettings(message.guildId);
@@ -271,6 +290,7 @@ function shouldButtIn(mode, settings, session) {
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     console.log('\n[verity] he does not want you to go.');
+    for (const [guildId] of client.guilds.cache) leaveVoice(guildId);
     store.shutdown();
     client.destroy();
     process.exit(0);

@@ -25,6 +25,11 @@ import { GREETING } from '../src/persona.js';
 import { looksLikeQuestion } from '../src/question.js';
 import { match as matchAnswer, fill } from '../src/faq.js';
 import { createConsole } from '../src/console.js';
+import { parse as parseMusic, trackFor } from '../src/music/commands.js';
+import { classify } from '../src/music/resolve.js';
+import * as musicPlayer from '../src/music/player.js';
+import { execFileSync } from 'node:child_process';
+import ffmpegPath from 'ffmpeg-static';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -583,6 +588,129 @@ await check('quit hands control back rather than killing the process', async () 
   );
   await run2('quit');
   assert.equal(quit, true);
+});
+
+console.log('\nmusic: what did you hand him');
+await check('spotify links of every shape are recognised', () => {
+  const link = classify('https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=x');
+  assert.equal(link.kind, 'spotify');
+  assert.equal(link.type, 'track');
+  assert.equal(link.id, '4cOdK2wGLETKBW3PvgPWqT');
+  assert.equal(classify('spotify:track:abc123').kind, 'spotify');
+  assert.equal(classify('https://open.spotify.com/intl-de/playlist/37i9dQ').type, 'playlist');
+});
+await check('audio files and radio streams play directly', () => {
+  assert.equal(classify('https://example.com/song.mp3').kind, 'direct');
+  assert.equal(classify('https://example.com/track.opus?x=1').kind, 'direct');
+  assert.equal(classify('http://ice1.somafm.com:80/groovesalad-128-mp3').kind, 'direct');
+});
+await check('pages and bare words need a resolver', () => {
+  assert.equal(classify('https://www.youtube.com/watch?v=abc').kind, 'page');
+  assert.equal(classify('never gonna give you up').kind, 'search');
+  assert.equal(classify('').kind, 'empty');
+});
+await check('a spotify link explains itself when nothing can fetch audio', async () => {
+  // No VERITY_YTDLP in the test env, so this is the out-of-the-box behaviour.
+  await assert.rejects(
+    () => trackFor('https://www.youtube.com/watch?v=abc', 'dave'),
+    /VERITY_YTDLP/,
+    'says what is missing rather than failing silently',
+  );
+});
+await check('a direct link becomes a playable track', async () => {
+  const track = await trackFor('https://example.com/Some%20Song_Name.mp3', 'dave');
+  assert.equal(track.title, 'Some Song Name', 'tidies the filename into a title');
+  assert.equal(track.requestedBy, 'dave');
+  assert.equal(typeof track.open, 'function');
+});
+
+console.log('\nmusic: commands');
+await check('veritysong and friends parse', () => {
+  assert.deepEqual(parseMusic('veritysong https://x.com/a.mp3'), {
+    command: 'song',
+    argument: 'https://x.com/a.mp3',
+  });
+  assert.equal(parseMusic('VeritySong  Some Song').argument, 'Some Song');
+  assert.equal(parseMusic('verityskip').command, 'skip');
+  assert.equal(parseMusic('verityq').command, 'q');
+});
+await check('ordinary chat is not a music command', () => {
+  for (const line of ['verity song x', 'hello', 'verity', 'song']) {
+    assert.equal(parseMusic(line), null, `should not parse: ${line}`);
+  }
+});
+
+console.log('\nmusic: the queue');
+// A real two-second Opus tone, so the queue is driven through the actual
+// audio player rather than a mock of it.
+const tone = execFileSync(
+  ffmpegPath,
+  [
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=1',
+    '-acodec',
+    'libopus',
+    '-f',
+    'opus',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-loglevel',
+    'error',
+    'pipe:1',
+  ],
+  { maxBuffer: 10 * 1024 * 1024 },
+);
+
+const { Readable } = await import('node:stream');
+let killed = 0;
+const fakeTrack = (title) => ({
+  title,
+  requestedBy: 'dave',
+  open: () => ({ stream: Readable.from([tone]), kill: () => (killed += 1) }),
+});
+
+const events = [];
+musicPlayer.__sessions.delete('guild-music');
+assert.equal(musicPlayer.__sessions.get('guild-music'), undefined, 'starting clean');
+
+await check('the first track plays and the rest queue behind it', () => {
+  // enqueue creates the session on demand, exactly as a join would.
+  const first = musicPlayer.enqueue('guild-music', fakeTrack('first song'));
+  musicPlayer.__sessions.get('guild-music').onEvent = (event) => events.push(event);
+  const second = musicPlayer.enqueue('guild-music', fakeTrack('second song'));
+  const third = musicPlayer.enqueue('guild-music', fakeTrack('third song'));
+
+  assert.equal(first.position, 0, 'the first one starts immediately');
+  assert.equal(second.position, 1);
+  assert.equal(third.position, 2);
+  assert.equal(musicPlayer.nowPlaying('guild-music').title, 'first song');
+  assert.deepEqual(
+    musicPlayer.queued('guild-music').map((track) => track.title),
+    ['second song', 'third song'],
+  );
+});
+await check('skip moves to the next one and kills the old process', async () => {
+  const before = killed;
+  const skipped = musicPlayer.skip('guild-music');
+  assert.equal(skipped.title, 'first song');
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(musicPlayer.nowPlaying('guild-music')?.title, 'second song', 'advanced to the next');
+  assert.ok(killed > before, 'the skipped source was killed, not left running');
+});
+await check('stop empties the queue', () => {
+  const dropped = musicPlayer.stop('guild-music');
+  assert.equal(dropped, 1, 'third song was still waiting');
+  assert.deepEqual(musicPlayer.queued('guild-music'), []);
+});
+await check('leave tears the session down', () => {
+  assert.equal(musicPlayer.leave('guild-music'), true);
+  assert.equal(musicPlayer.__sessions.has('guild-music'), false);
+  assert.equal(musicPlayer.leave('guild-music'), false, 'and says so if he was never there');
 });
 
 console.log('\nstore');

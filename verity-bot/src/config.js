@@ -76,6 +76,20 @@ export const config = {
   // which is why it stays unset unless you ask for it.
   reasoningEffort: process.env.VERITY_REASONING_EFFORT || undefined,
 
+  // Music. Spotify hands out track names, never audio — see music/resolve.js.
+  spotify: {
+    id: process.env.VERITY_SPOTIFY_ID || null,
+    secret: process.env.VERITY_SPOTIFY_SECRET || null,
+  },
+  // Where audio actually comes from for links that are not already audio.
+  // Unset means direct files, radio streams and local files only.
+  ytdlp:
+    !process.env.VERITY_YTDLP || process.env.VERITY_YTDLP === 'false'
+      ? null
+      : process.env.VERITY_YTDLP === 'true'
+        ? 'yt-dlp'
+        : process.env.VERITY_YTDLP,
+
   // Behaviour
   // Command confirmations are visible to the whole channel unless this is off.
   publicReplies: process.env.VERITY_PUBLIC_REPLIES !== 'false',

@@ -33,11 +33,11 @@ Powered by [discord.js](https://discord.js.org) and Claude (`claude-opus-5`).
 Use this URL with your application ID substituted in:
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=274877992000&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=274881137728&scope=bot%20applications.commands
 ```
 
 That permission set is: View Channels, Send Messages, Send Messages in Threads,
-Add Reactions, Embed Links, Read Message History.
+Add Reactions, Embed Links, Read Message History, Connect, Speak.
 
 ### 3. Configure and run
 
@@ -166,6 +166,57 @@ the glitch corruption and the guardrails are all in this repo's code, so they wo
 anywhere, but the voice itself is the model's job.
 
 `VERITY_EFFORT` is Anthropic-only and is ignored on the OpenAI-compatible path.
+
+---
+
+## Music
+
+Join a voice channel and type:
+
+```
+veritysong https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT
+veritysong https://cdn.example.com/song.mp3
+veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
+```
+
+| Command | |
+| --- | --- |
+| `veritysong <link or search>` | Play it, or add it to the queue |
+| `verityskip` · `veritystop` | Skip one · stop and clear the queue |
+| `verityqueue` · `veritynp` | What's waiting · what's on |
+| `verityjoin` · `verityleave` | Come in · get out |
+
+He joins whatever voice channel *you* are in, announces each track in the channel you
+typed in, and leaves on his own after five minutes of nothing. FFmpeg ships with the bot,
+so nothing extra is needed for the sources below.
+
+### About Spotify links
+
+**Spotify does not serve full-track audio to anything but its own apps.** No Discord bot
+plays audio from Spotify — not Jockie, not any of them. What they actually do, and what
+this does, is read the track's name and artist off the link and then play *that song* from
+somewhere else.
+
+So a Spotify link needs two things: something to read the title (built in — better with
+free API credentials in `VERITY_SPOTIFY_ID` / `VERITY_SPOTIFY_SECRET`) and something to
+fetch audio.
+
+### Where audio comes from
+
+Working out of the box, with nothing to install:
+
+- **Direct audio files** — any `.mp3`, `.m4a`, `.ogg`, `.opus`, `.wav`, `.flac` URL
+- **Radio streams** — Icecast/Shoutcast, `.m3u`, `.pls`
+- **Local files** — a path on the machine running him
+
+For YouTube links, Spotify links and plain searches, he needs a resolver:
+`VERITY_YTDLP=true` if [yt-dlp](https://github.com/yt-dlp/yt-dlp) is on your PATH, or the
+full path to it. Off by default, so nothing happens unless you turn it on.
+
+That last part is the piece that makes it behave like Jockie, and it's worth knowing what
+you're switching on: yt-dlp is a general-purpose downloader, but pointing it at YouTube
+runs against YouTube's terms of service — that is exactly what got Rythm and Groovy shut
+down, and it's why this ships off rather than on. Your server, your call.
 
 ---
 
@@ -379,6 +430,10 @@ src/
   question.js         is this message actually asking him something
   console.js          the terminal control console
   faq.js              canned answers and their loose matching
+  music/
+    commands.js       veritysong and friends
+    player.js         per-server queue and the voice connection
+    resolve.js        what did you hand him, and how to get audio from it
   setup-local.js      `npm run local` — set him up on a model on this machine
   throttle.js         per-minute cap + backoff when the provider says no
   announce.js         says a thing once, not after every message
