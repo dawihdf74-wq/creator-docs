@@ -186,8 +186,10 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityqueue` · `veritynp` | What's waiting · what's on |
 | `verityjoin` · `verityleave` | Come in · get out |
 
-He joins whatever voice channel *you* are in, announces each track in the channel you
-typed in, and leaves on his own after five minutes of nothing. FFmpeg ships with the bot,
+Those are **Discord** commands — type them in a channel, with yourself in a voice channel.
+He joins whatever voice channel you are in, announces each track in the channel you typed
+in, and leaves on his own after five minutes of nothing. The terminal console has the same
+controls, where you name the voice channel yourself: `join #voice-chat` then `play <link>`. FFmpeg ships with the bot,
 so nothing extra is needed for the sources below.
 
 ### About Spotify links
@@ -200,6 +202,21 @@ somewhere else.
 So a Spotify link needs two things: something to read the title (built in — better with
 free API credentials in `VERITY_SPOTIFY_ID` / `VERITY_SPOTIFY_SECRET`) and something to
 fetch audio.
+
+### Setting it up on Windows
+
+Settings live in the **`.env` file**, not in the terminal. Typing `VERITY_YTDLP=true` at a
+PowerShell prompt sets nothing — PowerShell doesn't use that syntax, and the bot reads
+`.env` anyway. Open `.env` in Notepad, add the line, save, restart him.
+
+To install the resolver:
+
+```powershell
+winget install yt-dlp
+```
+
+Then `VERITY_YTDLP=true` in `.env`. If `yt-dlp` isn't on your PATH afterwards, put the
+full path in instead: `VERITY_YTDLP=C:\Users\you\yt-dlp.exe`.
 
 ### Where audio comes from
 
@@ -266,6 +283,9 @@ fine if that is how your fingers work.
 | `mood [<#channel>] <mood>` | Set the mood, everywhere or in one channel |
 | `wipe [<#channel>]` | Make him forget a conversation |
 | `faq …` | Manage canned answers, below |
+| `join #voice-channel` | Get into a voice channel |
+| `play <link or search>` | Play it there — `veritysong <link>` works here too |
+| `skip` · `stop` · `queue` · `leave` | The rest of the music controls |
 | `quota [reset]` | Question budgets |
 | `models` | The fallback chain and what's spent |
 | `quit` | Shut him down |

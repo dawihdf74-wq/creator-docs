@@ -9,6 +9,8 @@ import { MOODS } from './persona.js';
 import { speak, inCharacterError } from './ai.js';
 import { splitMessage } from './split.js';
 import { match as matchAnswer } from './faq.js';
+import * as musicPlayer from './music/player.js';
+import { trackFor } from './music/commands.js';
 
 /**
  * A control console in the terminal Verity is running in.
@@ -33,6 +35,10 @@ const HELP = `
   mood #general clingy         just that channel
   wipe #general                make him forget that conversation
 
+  join #voice-channel          get into a voice channel
+  play <link or search>        play it there (veritysong works too)
+  skip · stop · queue · leave  the rest of the music controls
+
   faq                          list the canned answers
   faq add server ip, whats the ip = play.example.com
   faq test whats the server ip
@@ -52,7 +58,7 @@ const HELP = `
  */
 export function createConsole(client, out = (line = '') => console.log(line), onQuit = () => {}) {
   /** The channel currently being spoken into, if any. */
-  const state = { channel: null };
+  const state = { channel: null, voice: null };
   /** The guild to act on: the only one he is in, unless there are several. */
   const guildId = () => client.guilds.cache.first()?.id ?? 'dm';
 
@@ -83,6 +89,20 @@ export function createConsole(client, out = (line = '') => console.log(line), on
     );
   }
 
+  const musicGuildId = () => state.voice?.guild?.id ?? guildId();
+
+  /** Playback news goes to whoever is watching the terminal. */
+  const musicEvents = (event) => {
+    if (event.type === 'playing') out(`  ♪ now playing ${event.track.title}`);
+    if (event.type === 'error') out(`  ♪ that one broke: ${event.message}`);
+  };
+
+  const voiceList = () =>
+    [...client.channels.cache.values()]
+      .filter((channel) => channel.isVoiceBased?.())
+      .map((channel) => `#${channel.name}`)
+      .join(', ') || 'none he can see';
+
   /** Names the channels he can actually see, for when a guess misses. */
   const channelList = () =>
     [...client.channels.cache.values()]
@@ -95,10 +115,14 @@ export function createConsole(client, out = (line = '') => console.log(line), on
     const cleaned = line.trim().replace(/^<(.+)>$/, '$1');
     const [rawCommand, ...rest] = cleaned.split(/\s+/);
     // "/help" and "help" are the same thing here.
-    const command = rawCommand.replace(/^\//, '');
+    const command = rawCommand
+      .replace(/^\//, '')
+      // The Discord commands are muscle memory by now; accept them here too.
+      .replace(/^verity(?=(song|play|skip|next|stop|queue|q|np|nowplaying|join|leave|dc)$)/i, '')
+      .toLowerCase();
     const args = rest.join(' ').replace(/^<(.+)>$/, '$1');
 
-    switch (command.toLowerCase()) {
+    switch (command) {
       case '':
         return;
 
@@ -142,6 +166,59 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         return out(
           `  anything you type now goes to #${channel.name} as Verity. "use none" to stop.`,
         );
+      }
+
+      case 'join': {
+        const channel = findChannel(rest[0]);
+        if (!channel?.isVoiceBased?.()) {
+          out(`  "${rest[0] ?? ''}" is not a voice channel.`);
+          return out(`  voice channels: ${voiceList()}`);
+        }
+        await musicPlayer.join(channel, musicEvents);
+        state.voice = channel;
+        return out(`  he is in ${channel.name}. "play <link>" to put something on.`);
+      }
+
+      case 'play':
+      case 'song': {
+        if (!state.voice) return out('  he is not in a voice channel. try: join #general');
+        if (!args) return out('  play what? give me a link or something to search for.');
+        const track = await trackFor(args, 'the console');
+        await musicPlayer.join(state.voice, musicEvents);
+        const { position } = musicPlayer.enqueue(state.voice.guild.id, track);
+        return out(
+          position === 0 ? `  playing ${track.title}` : `  queued ${track.title} at ${position}`,
+        );
+      }
+
+      case 'skip':
+      case 'next': {
+        const skipped = musicPlayer.skip(musicGuildId());
+        return out(skipped ? `  skipped ${skipped.title}` : '  nothing playing');
+      }
+
+      case 'stop': {
+        const dropped = musicPlayer.stop(musicGuildId());
+        return out(`  stopped${dropped ? `, dropped ${dropped} queued` : ''}`);
+      }
+
+      case 'queue':
+      case 'q':
+      case 'np':
+      case 'nowplaying': {
+        const current = musicPlayer.nowPlaying(musicGuildId());
+        const rest2 = musicPlayer.queued(musicGuildId());
+        if (!current && !rest2.length) return out('  nothing playing');
+        out(`  now: ${current?.title ?? 'nothing'}`);
+        rest2.forEach((track, index) => out(`  ${index + 1}. ${track.title}`));
+        return;
+      }
+
+      case 'leave':
+      case 'dc': {
+        const left = musicPlayer.leave(musicGuildId());
+        state.voice = null;
+        return out(left ? '  out.' : '  he is not in a voice channel.');
       }
 
       case 'channels': {

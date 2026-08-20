@@ -574,6 +574,62 @@ await check('mood changes it everywhere', async () => {
   await run('mood sideways');
   assert.match(lastOutput(), /pick one of/);
 });
+await check('veritysong typed in the console is understood, not rejected', async () => {
+  clear();
+  await run('veritysong https://open.spotify.com/track/abc');
+  assert.doesNotMatch(lastOutput(), /not a command/, 'the Discord spelling works here too');
+  assert.match(lastOutput(), /voice channel/, 'and says what is actually missing');
+});
+await check('play without a voice channel says how to get one', async () => {
+  clear();
+  await run('play something');
+  assert.match(lastOutput(), /join #/);
+});
+await check('joining a text channel is refused with the real options', async () => {
+  const voice = {
+    id: 'vc1',
+    name: 'Voice Chat',
+    isVoiceBased: () => true,
+    guild: { id: 'guild-console' },
+  };
+  fakeClient.channels.cache.set('vc1', voice);
+  clear();
+  await run('join #general'); // a text channel
+  assert.match(printed.join('\n'), /not a voice channel/);
+  assert.match(printed.join('\n'), /Voice Chat/, 'lists the voice channels he can see');
+  fakeClient.channels.cache.delete('vc1');
+});
+await check('joining a voice channel he is already in does not reconnect', async () => {
+  const voice = {
+    id: 'vc1',
+    name: 'Voice Chat',
+    isVoiceBased: () => true,
+    guild: { id: 'guild-console' },
+  };
+  fakeClient.channels.cache.set('vc1', voice);
+  // Pre-seed the session as already connected there, so join() returns early
+  // instead of opening a real voice connection.
+  musicPlayer.__sessions.set('guild-console', {
+    guildId: 'guild-console',
+    connection: { joinConfig: { channelId: 'vc1' } },
+    queue: [],
+    current: null,
+    idleTimer: null,
+    player: { state: { status: 'idle' }, stop() {} },
+    onEvent: () => {},
+  });
+
+  clear();
+  await run('join #Voice Chat');
+  assert.match(lastOutput(), /he is in Voice Chat/);
+
+  clear();
+  await run('queue');
+  assert.match(lastOutput(), /nothing playing/);
+
+  musicPlayer.__sessions.delete('guild-console');
+  fakeClient.channels.cache.delete('vc1');
+});
 await check('nonsense points at help', async () => {
   clear();
   await run('summon the ancient one');
