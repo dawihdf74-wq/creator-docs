@@ -1145,59 +1145,91 @@ await check('leave tears the session down', () => {
   assert.equal(musicPlayer.leave('guild-music'), false, 'and says so if he was never there');
 });
 
-console.log('\nmusic: the clickable list');
-await check('an empty list still renders, with nothing to click', () => {
+console.log('\nmusic: the clickable panel');
+// Assert against toJSON(), which is exactly what Discord receives.
+const panel = (guildId, page) => {
+  const view = buildPlaylistView(guildId, page);
+  const components = view.components.map((row) => row.toJSON()).flatMap((row) => row.components);
+  return {
+    ...view,
+    menu: components.find((component) => component.type === 3),
+    buttons: components.filter((component) => component.type === 2),
+  };
+};
+
+await check('an empty list still renders, with nothing to pick', () => {
   musicPlayer.__sessions.delete('guild-view');
-  const view = buildPlaylistView('guild-view', 1);
-  assert.equal(view.components.length, 0, 'no buttons for an empty queue');
+  const view = panel('guild-view', 1);
+  assert.equal(view.menu, undefined, 'no dropdown when nothing is waiting');
   assert.match(view.embeds[0].data.description, /nothing playing/);
 });
-await check('every track on the page gets a button', () => {
+await check('every waiting song is an option, by name', () => {
   musicPlayer.__sessions.delete('guild-view');
-  for (let i = 1; i <= 7; i += 1) musicPlayer.enqueue('guild-view', fakeTrack(`song ${i}`));
-  // one playing, six waiting
-  const view = buildPlaylistView('guild-view', 1);
-  const buttons = view.components.flatMap((row) => row.components);
-  const playNext = buttons.filter((button) => button.data.custom_id?.startsWith('vpl:next:'));
-  assert.equal(playNext.length, 6, 'a button per waiting track');
-  assert.deepEqual(
-    playNext.map((button) => button.data.label),
-    ['1', '2', '3', '4', '5', '6'],
-    'labelled with the numbers the commands take',
-  );
-  assert.ok(
-    view.components.every((row) => row.components.length <= 5),
-    'five to a row, as Discord requires',
-  );
-});
-await check('long lists page, and the buttons keep the real numbers', () => {
-  musicPlayer.__sessions.delete('guild-view-long');
-  for (let i = 1; i <= 26; i += 1) musicPlayer.enqueue('guild-view-long', fakeTrack(`song ${i}`));
-  const second = buildPlaylistView('guild-view-long', 2);
-  assert.equal(second.page, 2);
-  const ids = second.components
-    .flatMap((row) => row.components)
-    .map((button) => button.data.custom_id)
-    .filter((id) => id?.startsWith('vpl:next:'));
-  assert.equal(ids[0], `vpl:next:${PAGE_SIZE + 1}`, 'page two starts where page one stopped');
-  assert.ok(second.embeds[0].data.footer.text.includes('page 2'));
+  for (let i = 1; i <= 5; i += 1) musicPlayer.enqueue('guild-view', fakeTrack(`song ${i}`));
+  // song 1 plays; 2-5 wait
+  const view = panel('guild-view', 1);
 
-  const beyond = buildPlaylistView('guild-view-long', 99);
+  assert.ok(view.menu, 'there is a dropdown');
+  assert.equal(view.menu.options.length, 4, 'one option per waiting song');
+  assert.deepEqual(
+    view.menu.options.map((option) => option.label),
+    ['song 2', 'song 3', 'song 4', 'song 5'],
+    'labelled with the song, not a number',
+  );
+  assert.match(view.menu.options[0].description, /#1/, 'the number is still there as a hint');
+  assert.match(view.menu.placeholder, /plays next/i, 'and it says what picking one does');
+});
+await check('picking a song gets that song, even after the numbers move', () => {
+  const view = panel('guild-view', 1);
+  // Whoever is reading picks "song 4".
+  const chosen = view.menu.options.find((option) => option.label === 'song 4').value;
+
+  // Meanwhile someone else reorders, so every position shifts.
+  musicPlayer.moveToFront('guild-view', 3);
+
+  const moved = musicPlayer.moveToFrontById('guild-view', chosen);
+  assert.equal(moved.title, 'song 4', 'the id still points at the song they read');
+  assert.equal(musicPlayer.queued('guild-view')[0].title, 'song 4', 'and it is next');
+});
+await check('a song that has since gone is refused, not confused', () => {
+  assert.equal(musicPlayer.moveToFrontById('guild-view', 'no-such-track'), null);
+  musicPlayer.leave('guild-view');
+});
+await check('long lists page, keeping the numbers honest', () => {
+  musicPlayer.__sessions.delete('guild-view-long');
+  for (let i = 1; i <= 60; i += 1) musicPlayer.enqueue('guild-view-long', fakeTrack(`song ${i}`));
+  const second = panel('guild-view-long', 2);
+
+  assert.equal(second.page, 2);
+  assert.ok(second.menu.options.length <= 25, 'never more options than Discord accepts');
+  assert.match(
+    second.menu.options[0].description,
+    new RegExp(`#${PAGE_SIZE + 1}`),
+    'page two carries on from page one',
+  );
+  assert.ok(second.embeds[0].data.footer.text.includes('page 2'));
+  assert.ok(
+    second.buttons.some((button) => button.custom_id === 'vpl:page:1'),
+    'and there is a way back',
+  );
+
+  const beyond = panel('guild-view-long', 99);
   assert.ok(beyond.page < 99, 'asking past the end lands on the last page');
   musicPlayer.leave('guild-view-long');
 });
-await check('a press says what it is and what it is for', () => {
-  assert.deepEqual(parseId('vpl:next:7'), { action: 'next', value: 7 });
-  assert.deepEqual(parseId('vpl:page:2'), { action: 'page', value: 2 });
-  assert.equal(parseId('something:else:1'), null, 'other buttons are not his');
+await check('very long titles are trimmed to what Discord allows', () => {
+  musicPlayer.__sessions.delete('guild-title');
+  musicPlayer.enqueue('guild-title', fakeTrack('playing'));
+  musicPlayer.enqueue('guild-title', fakeTrack('x'.repeat(300)));
+  const view = panel('guild-title', 1);
+  assert.ok(view.menu.options[0].label.length <= 100, 'inside the 100 character limit');
+  assert.match(view.menu.options[0].label, /…$/, 'and cut visibly rather than silently');
+  musicPlayer.leave('guild-title');
 });
-await check('the number on a button is the number veritynext takes', () => {
-  const view = buildPlaylistView('guild-view', 1);
-  const first = view.components[0].components[0];
-  const { value } = parseId(first.data.custom_id);
-  const moved = musicPlayer.moveToFront('guild-view', value);
-  assert.equal(moved.title, 'song 2', 'button 1 is the first waiting track');
-  musicPlayer.leave('guild-view');
+await check('a press says what it is and what page it came from', () => {
+  assert.deepEqual(parseId('vpl:pick:2'), { action: 'pick', value: 2 });
+  assert.deepEqual(parseId('vpl:page:3'), { action: 'page', value: 3 });
+  assert.equal(parseId('something:else:1'), null, 'other components are not his');
 });
 
 console.log('\nmusic: quality and loading');

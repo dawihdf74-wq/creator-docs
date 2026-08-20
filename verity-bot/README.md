@@ -199,11 +199,16 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityvolume 50` | Percent, 0 to 200 |
 | `verityjoin` · `verityleave` | Come in · get out |
 
-**The clickable list.** `veritypls` posts the queue as an embed with a numbered ⏫ button
-on every waiting track — press one and it jumps to the front, and the message redraws
-itself in place. Ten tracks a page, with ◀ ▶ to move between pages, 🔄 to refresh and ⏭ to
-skip. The buttons obey the same DJ list the typed commands do, and the numbers on them are
-the same ones `veritynext` and `verityremove` take.
+**The clickable panel.** `veritypls` posts the queue as an embed with a **dropdown of song
+titles** underneath: open it, pick the song you want, and it plays next. The message
+redraws itself in place, with Refresh and Skip buttons beside it and ◀ ▶ once there is more
+than a page (25 songs). The panel obeys the same DJ list the typed commands do.
+
+Each option carries the track's own id rather than its position, which matters more than it
+sounds: queue numbers shift every time anyone reorders anything, so picking "4" off a list
+someone else has since changed used to get a different song than the one you read. Now it
+gets the song you picked, wherever it has drifted to — and if it has already played, it
+says so instead of grabbing whatever landed in its place.
 
 **Short forms**, since some of these got long:
 

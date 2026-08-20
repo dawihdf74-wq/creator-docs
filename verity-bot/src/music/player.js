@@ -24,6 +24,19 @@ import {
 const sessions = new Map();
 
 /**
+ * Every track gets an id that stays with it.
+ *
+ * Queue positions move constantly — one press reorders everything below it —
+ * so anything the user clicked has to be identified by what it *is*, not
+ * where it happened to be sitting when the message was drawn.
+ */
+let counter = 0;
+const identify = (track) => {
+  track.id ??= `t${(counter += 1)}`;
+  return track;
+};
+
+/**
  * What listeners actually receive is capped by the voice channel's own
  * bitrate — 64 kbps by default, more on a boosted server — so encoding above
  * it just burns CPU, and encoding below it throws away quality for nothing.
@@ -187,7 +200,7 @@ export async function join(voiceChannel, onEvent) {
 
 export function enqueue(guildId, track) {
   const state = session(guildId);
-  state.queue.push(track);
+  state.queue.push(identify(track));
 
   if (!state.current && state.player.state.status === AudioPlayerStatus.Idle) {
     advance(state);
@@ -200,7 +213,7 @@ export function enqueue(guildId, track) {
 export function enqueueAll(guildId, tracks) {
   const state = session(guildId);
   const startedEmpty = !state.current && state.player.state.status === AudioPlayerStatus.Idle;
-  state.queue.push(...tracks);
+  state.queue.push(...tracks.map(identify));
   if (startedEmpty) advance(state);
   return { added: tracks.length, startedPlaying: startedEmpty };
 }
@@ -302,6 +315,17 @@ export function moveToFront(guildId, position, speed = null) {
   if (speed) track.speed = speed;
   queue.unshift(track);
   return track;
+}
+
+/**
+ * The same, but for a track the user picked out of a list. Positions shift
+ * under people; an id does not.
+ */
+export function moveToFrontById(guildId, id, speed = null) {
+  const queue = sessions.get(guildId)?.queue;
+  const index = queue?.findIndex((track) => track.id === id) ?? -1;
+  if (index < 0) return null;
+  return moveToFront(guildId, index + 1, speed);
 }
 
 /** Skips straight to a queued track, dropping everything in front of it. */

@@ -99,8 +99,8 @@ client.once(Events.ClientReady, (ready) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  // Buttons on the playlist embed.
-  if (interaction.isButton()) {
+  // The playlist panel: a dropdown of songs, and the controls beside it.
+  if (interaction.isButton() || interaction.isStringSelectMenu()) {
     const press = parseId(interaction.customId);
     if (!press) return;
 
@@ -113,21 +113,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .catch(() => {});
     }
 
+    const who = interaction.member?.displayName ?? interaction.user.username;
     let note;
-    if (press.action === 'next') {
-      const moved = musicPlayer.moveToFront(interaction.guildId, press.value);
-      note = moved
-        ? `${moved.title} is next, because ${interaction.member?.displayName ?? interaction.user.username} said so`
-        : 'that one is already gone';
+
+    if (press.action === 'pick') {
+      // The option carries the track's own id, so this is the song they read,
+      // wherever it has drifted to in the queue since the list was drawn.
+      const moved = musicPlayer.moveToFrontById(interaction.guildId, interaction.values?.[0]);
+      note = moved ? `${moved.title} is next — ${who} picked it` : 'that one is already gone';
     }
+
     if (press.action === 'skip') {
       const skipped = musicPlayer.skip(interaction.guildId);
-      note = skipped ? `skipped ${skipped.title}` : 'nothing to skip';
+      note = skipped ? `${who} skipped ${skipped.title}` : 'nothing to skip';
     }
 
     // Redraw in place: the list has usually changed under the press.
-    const page = press.action === 'next' ? 1 : press.value;
-    const { embeds, components } = buildPlaylistView(interaction.guildId, page, { note });
+    const { embeds, components } = buildPlaylistView(interaction.guildId, press.value || 1, {
+      note,
+    });
     return interaction.update({ embeds, components }).catch(() => {});
   }
 
