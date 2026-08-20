@@ -128,7 +128,7 @@ const filters = ({ speed = 1, volume = 1 }) => {
  * title/subtitle pairs. Credentials are steadier; this is for when you have
  * none.
  */
-export function parseEmbedTracks(html) {
+export function parseEmbedPlaylist(html) {
   const text = String(html ?? '');
 
   const readers = [
@@ -157,6 +157,13 @@ export function parseEmbedTracks(html) {
       ),
   ];
 
+  // The page names itself, in one of a few places.
+  const named =
+    text.match(/<meta property="og:title" content="([^"]+)"/)?.[1] ??
+    text.match(/"name":"((?:[^"\\]|\\.)*)"/)?.[1] ??
+    null;
+  const name = named ? named.replace(/\\"/g, '"') : null;
+
   for (const read of readers) {
     let rows;
     try {
@@ -172,11 +179,14 @@ export function parseEmbedTracks(html) {
         search: `${row.subtitle ?? ''} ${row.title}`.trim(),
       }));
 
-    if (tracks.length) return tracks;
+    if (tracks.length) return { name, tracks };
   }
 
-  return [];
+  return { name, tracks: [] };
 }
+
+/** Just the tracks, for callers that do not care what the list is called. */
+export const parseEmbedTracks = (html) => parseEmbedPlaylist(html).tracks;
 
 /** A playlist or album without any credentials at all. */
 async function spotifyListNoAuth({ type, id }) {
@@ -191,7 +201,7 @@ async function spotifyListNoAuth({ type, id }) {
   });
 
   if (!response.ok) throw new Error(`spotify answered ${response.status} for that ${type}.`);
-  return parseEmbedTracks(await response.text());
+  return parseEmbedPlaylist(await response.text());
 }
 
 /** Every track on a Spotify playlist or album, in order. */
@@ -201,9 +211,9 @@ export async function spotifyList({ type, id }) {
   if (!config.spotify.id || !config.spotify.secret) {
     const scraped = await spotifyListNoAuth({ type, id }).catch((error) => {
       console.error('[verity] spotify embed read failed:', error.message);
-      return [];
+      return { name: null, tracks: [] };
     });
-    if (scraped.length) return scraped;
+    if (scraped.tracks.length) return scraped;
 
     throw new Error(
       `i could not read that ${type} without credentials. spotify changes that page whenever it likes. ` +
@@ -237,13 +247,27 @@ export async function spotifyList({ type, id }) {
     .filter((track) => track?.name);
   if (!items.length) throw new Error('that list is empty, or spotify would not show it to me.');
 
-  return items.map((track) => {
-    const artists = (track.artists ?? []).map((artist) => artist.name).join(', ');
-    return {
-      title: [artists, track.name].filter(Boolean).join(' - '),
-      search: `${artists} ${track.name}`.trim(),
-    };
-  });
+  // One more call for the list's own name, so a saved playlist keeps it.
+  const named = await fetch(
+    `https://api.spotify.com/v1/${type === 'album' ? 'albums' : 'playlists'}/${id}?fields=name`,
+    {
+      headers: { Authorization: `Bearer ${token.access_token}` },
+      signal: AbortSignal.timeout(10_000),
+    },
+  )
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+
+  return {
+    name: named?.name ?? null,
+    tracks: items.map((track) => {
+      const artists = (track.artists ?? []).map((artist) => artist.name).join(', ');
+      return {
+        title: [artists, track.name].filter(Boolean).join(' - '),
+        search: `${artists} ${track.name}`.trim(),
+      };
+    }),
+  };
 }
 
 /** Every entry of a playlist yt-dlp can see, without downloading any of it. */
@@ -254,15 +278,26 @@ export async function ytdlpList(url) {
 
   const { stdout } = await run(
     config.ytdlp,
-    ['--flat-playlist', '--print', '%(title)s\t%(url)s', '--quiet', '--no-warnings', url],
+    [
+      '--flat-playlist',
+      '--print',
+      '%(playlist_title)s\t%(title)s\t%(url)s',
+      '--quiet',
+      '--no-warnings',
+      url,
+    ],
     { timeout: 60_000, maxBuffer: 8 * 1024 * 1024 },
   );
 
-  return stdout
+  const rows = stdout
     .split('\n')
     .map((line) => line.split('\t'))
-    .filter(([title, entry]) => title && entry)
-    .map(([title, entry]) => ({ title: title.trim(), url: entry.trim() }));
+    .filter(([, title, entry]) => title && entry);
+
+  return {
+    name: rows[0]?.[0]?.trim() || null,
+    entries: rows.map(([, title, entry]) => ({ title: title.trim(), url: entry.trim() })),
+  };
 }
 
 /** ffmpeg turns anything it can open into the Ogg Opus that Discord wants. */

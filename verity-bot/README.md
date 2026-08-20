@@ -188,7 +188,8 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityplaylist` | Everything lined up, numbered. `verityplaylist 2` for the next page |
 | `veritynext <n> [speed]` | That one plays next — at that speed, if you name one |
 | `verityjump <n>` | Go straight to it, binning everything in between |
-| `veritysaveplaylist <name>` | Keep this queue for later |
+| `veritysaveplaylist <link>` | Keep a playlist for later, under its own name |
+| `veritysaveplaylist <name>` | Keep the current queue under that name |
 | `verityplaylist <name>` | Put a saved one back. `verityplaylist saved` lists them |
 | `veritydeleteplaylist <name>` | Forget one |
 | `verityshuffle` · `verityclear` · `verityremove <n>` | Reorder the queue |
@@ -213,8 +214,15 @@ verityjump 4          → skip straight to it, dropping 1–3
 A speed set that way belongs to the track, not the session: the rest of the queue plays
 normally, and `veritynp` shows the `2x` badge while it's on.
 
-**Saving a queue.** `veritysaveplaylist friday` keeps whatever is lined up, including any
-per-track speeds. `verityplaylist friday` puts it back, `verityplaylist saved` lists what
+**Saving a playlist.** Hand it a link and he keeps that playlist, without playing a note:
+
+```
+veritysaveplaylist https://open.spotify.com/playlist/…          → kept under its own name
+veritysaveplaylist https://open.spotify.com/playlist/… as friday → kept under yours
+```
+
+Or hand it a name instead of a link and he keeps whatever is currently lined up, including
+any per-track speeds. `verityplaylist friday` puts it back, `verityplaylist saved` lists what
 you've kept, `veritydeleteplaylist friday` forgets it. What's stored is the title and where
 each track came from — enough to rebuild it — so saved playlists survive restarts.
 

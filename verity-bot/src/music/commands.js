@@ -139,11 +139,13 @@ export async function tracksFor(input, requestedBy) {
     case 'spotify': {
       if (target.type !== 'track') {
         // A playlist or an album: every track, in order.
-        const items = await spotifyList(target);
-        if (!ytdlpEnabled()) throw new Error(`that is ${items.length} tracks, and ${NO_SOURCE}`);
+        const list = await spotifyList(target);
+        if (!ytdlpEnabled())
+          throw new Error(`that is ${list.tracks.length} tracks, and ${NO_SOURCE}`);
         return {
-          tracks: items.map((item) => searchTrack(item.title, item.search, requestedBy)),
-          label: `${items.length} tracks from that ${target.type}`,
+          tracks: list.tracks.map((item) => searchTrack(item.title, item.search, requestedBy)),
+          label: list.name ?? `${list.tracks.length} tracks from that ${target.type}`,
+          playlistName: list.name,
         };
       }
 
@@ -162,13 +164,14 @@ export async function tracksFor(input, requestedBy) {
 
       // A link that carries a playlist gets the whole playlist.
       if (/[?&]list=/.test(target.url)) {
-        const items = await ytdlpList(target.url);
-        if (items.length > 1) {
+        const list = await ytdlpList(target.url);
+        if (list.entries.length > 1) {
           return {
-            tracks: items.map((item) =>
+            tracks: list.entries.map((item) =>
               resolvedTrack({ title: item.title, requestedBy, target: item.url }),
             ),
-            label: `${items.length} tracks from that playlist`,
+            label: list.name ?? `${list.entries.length} tracks from that playlist`,
+            playlistName: list.name,
           };
         }
       }
@@ -351,6 +354,10 @@ export async function handle({ command, argument }, message) {
         ].join('\n');
       }
 
+      if (/^(https?:\/\/|spotify:)/i.test(wanted)) {
+        return '`veritysong <link>` to play it now, or `veritysaveplaylist <link>` to keep it for later.';
+      }
+
       // A name: put that saved playlist back into the queue.
       const saved = store.getPlaylist(guildId, wanted);
       if (!saved) {
@@ -368,15 +375,49 @@ export async function handle({ command, argument }, message) {
 
     case 'saveplaylist':
     case 'save': {
-      const name = argument.trim().slice(0, 40);
-      if (!name) return 'save it as what? `veritysaveplaylist friday` and it is yours.';
+      const asked = argument.trim();
+
+      // Handed a link: keep that playlist, without having to play it first.
+      if (/^(https?:\/\/|spotify:)/i.test(asked)) {
+        const [link, ...rest] = asked.split(/\s+/);
+        const given = rest
+          .join(' ')
+          .replace(/^as\s+/i, '')
+          .trim();
+
+        const resolved = await tracksFor(
+          link,
+          message.member?.displayName ?? message.author.username,
+        );
+        const name = (given || resolved.playlistName || resolved.label).slice(0, 60);
+        const entries = resolved.tracks
+          .filter((track) => track.meta)
+          .map((track) => ({ title: track.title, meta: track.meta, speed: null }));
+
+        if (!entries.length) return 'there was nothing in that i could keep.';
+
+        store.savePlaylist(
+          guildId,
+          name,
+          entries,
+          message.member?.displayName ?? message.author.username,
+        );
+        return `kept **${name}** — ${entries.length} tracks. \`verityplaylist ${name}\` puts it on. i will not forget it. :)`;
+      }
+
+      const name = asked.slice(0, 40);
+      if (!name) {
+        return 'save what? give me a playlist link, or a name to keep the current queue under.';
+      }
       if (/^\d+$/.test(name)) return 'not a number — those are page numbers. give it a word.';
 
       const entries = [player.nowPlaying(guildId), ...player.queued(guildId)]
         .filter((track) => track?.meta)
         .map((track) => ({ title: track.title, meta: track.meta, speed: track.speed ?? null }));
 
-      if (!entries.length) return 'there is nothing playing to save. put something on first.';
+      if (!entries.length) {
+        return 'nothing is playing, so there is nothing to keep. put something on, or hand me a playlist link.';
+      }
 
       store.savePlaylist(
         guildId,

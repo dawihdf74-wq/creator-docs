@@ -32,7 +32,12 @@ import {
   isDj,
   rebuildTrack,
 } from '../src/music/commands.js';
-import { classify, tempoFilter, parseEmbedTracks } from '../src/music/resolve.js';
+import {
+  classify,
+  tempoFilter,
+  parseEmbedTracks,
+  parseEmbedPlaylist,
+} from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { resolveBitrate } from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
@@ -714,6 +719,24 @@ await check('reads the current embed shape', () => {
     'artist and title, the way a queue reads',
   );
   assert.equal(tracks[0].search, 'Some Band First Song', 'and a sensible thing to search for');
+});
+await check('reads the playlist name off the page', () => {
+  const payload = {
+    props: {
+      pageProps: { state: { data: { entity: { trackList: [{ title: 'A', subtitle: 'B' }] } } } },
+    },
+  };
+  const html = `<meta property="og:title" content="Moja playlista #4"><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(payload)}</script>`;
+  const list = parseEmbedPlaylist(html);
+  assert.equal(list.name, 'Moja playlista #4', 'so a saved playlist keeps its own name');
+  assert.equal(list.tracks.length, 1);
+  assert.deepEqual(parseEmbedTracks(html), list.tracks, 'the tracks-only view still works');
+});
+await check('a nameless page is still readable', () => {
+  const html = '{"title":"Loose Song","subtitle":"Loose Band"}';
+  const list = parseEmbedPlaylist(html);
+  assert.equal(list.tracks.length, 1);
+  assert.equal(typeof list.name, 'object', 'null rather than a guess');
 });
 await check('reads the older embed shape too', () => {
   const entity = {
