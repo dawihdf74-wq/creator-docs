@@ -235,6 +235,16 @@ verityjump 4          → skip straight to it, dropping 1–3
 A speed set that way belongs to the track, not the session: the rest of the queue plays
 normally, and `veritynp` shows the `2x` badge while it's on.
 
+**Staying in the channel.** Discord drops voice connections constantly — websocket
+resumes, region moves, a UDP blip — and almost none of it means anything. Verity rejoins
+through those, backing off a little further each time, and only gives up after five failed
+attempts or when he's actually been removed from the channel. Being *moved* between
+channels he simply follows. He leaves on his own only after five minutes with nothing to
+play, and re-checks that's still true before going.
+
+If he does leave unexpectedly, the terminal says why: `[verity] voice: dropped (…)` for a
+recovered blip, `giving up — …` when he stops trying.
+
 **Autoplay.** `verityautoplay on` and the music doesn't stop when the queue does — he takes
 whatever finished last, reads the front of YouTube's endless mix for it, and queues
 something from there, skipping anything played in the last 30 tracks so the evening doesn't

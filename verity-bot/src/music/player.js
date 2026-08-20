@@ -3,6 +3,7 @@ import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
   StreamType,
+  VoiceConnectionDisconnectReason,
   VoiceConnectionStatus,
   createAudioPlayer,
   createAudioResource,
@@ -132,7 +133,13 @@ function advance(state) {
   const next = state.queue.shift();
   if (!next) {
     state.onEvent({ type: 'empty', last: state.lastPlayed, history: state.history });
-    state.idleTimer = setTimeout(() => leave(state.guildId), IDLE_MS);
+    state.idleTimer = setTimeout(() => {
+      // Check again rather than trusting a timer set five minutes ago.
+      const now = sessions.get(state.guildId);
+      if (!now || now.current || now.queue.length) return;
+      console.log('[verity] voice: nothing to play for five minutes, leaving');
+      leave(state.guildId);
+    }, IDLE_MS);
     state.idleTimer.unref?.();
     return;
   }
@@ -169,6 +176,55 @@ function elapsed(state) {
   return state.seekBase + played * rate;
 }
 
+/** How many times to fight for the connection before accepting it is gone. */
+export const REJOIN_LIMIT = 5;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * What to do when Discord drops the voice connection.
+ *
+ * Discord disconnects constantly and most of it means nothing: websocket
+ * resumes, voice region moves, a UDP blip. Treating every one of those as
+ * "he left" is why he kept vanishing mid-song. Almost all of them are
+ * recoverable by rejoining, so that is the default, and only a real removal
+ * from the channel or a run of failed rejoins ends the session.
+ *
+ * Split out from the listener so it can be tested without a live gateway.
+ *
+ * @returns {Promise<'moved'|'rejoining'|'gave up'>}
+ */
+export async function handleDisconnect(connection, disconnect, options) {
+  const { giveUp, wait = sleep, awaitReconnect } = options;
+
+  // 4014 is Discord saying we are no longer in the channel: either someone
+  // moved us, which comes back on its own, or we were removed, which does not.
+  if (
+    disconnect?.reason === VoiceConnectionDisconnectReason.WebSocketClose &&
+    disconnect?.closeCode === 4014
+  ) {
+    try {
+      await (awaitReconnect ?? ((c) => entersState(c, VoiceConnectionStatus.Connecting, 5_000)))(
+        connection,
+      );
+      return 'moved';
+    } catch {
+      giveUp('removed from the channel');
+      return 'gave up';
+    }
+  }
+
+  if ((connection.rejoinAttempts ?? 0) < REJOIN_LIMIT) {
+    // Back off a little further each time rather than hammering the gateway.
+    await wait(((connection.rejoinAttempts ?? 0) + 1) * 2_000);
+    connection.rejoin();
+    return 'rejoining';
+  }
+
+  giveUp(`could not get back in after ${REJOIN_LIMIT} tries`);
+  return 'gave up';
+}
+
 /** Connects to a voice channel, reusing the connection if he is already there. */
 export async function join(voiceChannel, onEvent) {
   const state = session(voiceChannel.guild.id);
@@ -185,17 +241,33 @@ export async function join(voiceChannel, onEvent) {
     selfDeaf: true,
   });
 
-  state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    // A move and a dropped connection look the same at first.
-    try {
-      await Promise.race([
-        entersState(state.connection, VoiceConnectionStatus.Signalling, 5000),
-        entersState(state.connection, VoiceConnectionStatus.Connecting, 5000),
-      ]);
-    } catch {
-      leave(state.guildId);
-    }
-  });
+  // discord.js keeps one connection per guild, so moving channels hands back
+  // the same object. Attaching again would stack listeners, and a stale one
+  // closing over an old session would eventually destroy the current one.
+  if (!state.connection.__verityWatched) {
+    state.connection.__verityWatched = true;
+
+    state.connection.on(VoiceConnectionStatus.Disconnected, (_old, disconnect) => {
+      handleDisconnect(state.connection, disconnect, {
+        giveUp: (why) => {
+          console.warn(`[verity] voice: giving up — ${why}`);
+          leave(state.guildId);
+        },
+      }).then((outcome) => {
+        if (outcome !== 'gave up') {
+          console.log(
+            `[verity] voice: dropped (${disconnect?.closeCode ?? disconnect?.reason}), ${outcome}`,
+          );
+        }
+      });
+    });
+
+    // A recovered connection is a fresh one underneath: without this he sits
+    // in the channel playing to nobody.
+    state.connection.on(VoiceConnectionStatus.Ready, () => {
+      state.connection.subscribe(state.player);
+    });
+  }
 
   await entersState(state.connection, VoiceConnectionStatus.Ready, 20_000);
   state.connection.subscribe(state.player);

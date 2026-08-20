@@ -41,9 +41,11 @@ import {
 } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { buildPlaylistView, parseId, PAGE_SIZE } from '../src/music/view.js';
+import { handleDisconnect, REJOIN_LIMIT } from '../src/music/player.js';
 import { resolveBitrate } from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
+import { VoiceConnectionDisconnectReason } from '@discordjs/voice';
 import { config } from '../src/config.js';
 import { splitMessage } from '../src/split.js';
 import { mentionsName } from '../src/addressed.js';
@@ -1242,6 +1244,71 @@ await check('running dry reports what it ran dry after', async () => {
   assert.equal(empty.last?.title, 'only one', 'and what it just finished — autoplay needs that');
   assert.ok(Array.isArray(empty.history), 'along with what has been heard already');
   musicPlayer.leave('guild-empty');
+});
+
+console.log('\nmusic: holding the voice connection');
+// A stand-in for a VoiceConnection: enough of one to drive the handler.
+const fakeConnection = (attempts = 0) => {
+  const connection = { rejoinAttempts: attempts, rejoined: 0 };
+  connection.rejoin = () => {
+    connection.rejoined += 1;
+    connection.rejoinAttempts += 1;
+  };
+  return connection;
+};
+const instantly = async () => {};
+
+await check('an ordinary drop is rejoined, not abandoned', async () => {
+  const connection = fakeConnection();
+  let gaveUp = null;
+  const outcome = await handleDisconnect(
+    connection,
+    { reason: 0 /* anything that is not a 4014 close */ },
+    { giveUp: (why) => (gaveUp = why), wait: instantly },
+  );
+  assert.equal(outcome, 'rejoining', 'the common case keeps him in the channel');
+  assert.equal(connection.rejoined, 1);
+  assert.equal(gaveUp, null, 'and nothing is torn down');
+});
+await check('he keeps trying, then stops', async () => {
+  const connection = fakeConnection(REJOIN_LIMIT);
+  let gaveUp = null;
+  const outcome = await handleDisconnect(
+    connection,
+    { reason: 0 },
+    { giveUp: (why) => (gaveUp = why), wait: instantly },
+  );
+  assert.equal(outcome, 'gave up', 'a connection that will not come back is let go');
+  assert.equal(connection.rejoined, 0);
+  assert.match(gaveUp, new RegExp(String(REJOIN_LIMIT)), 'and says how hard it tried');
+});
+await check('being moved between channels is not a reason to leave', async () => {
+  const connection = fakeConnection();
+  let gaveUp = null;
+  const outcome = await handleDisconnect(
+    connection,
+    { reason: VoiceConnectionDisconnectReason.WebSocketClose, closeCode: 4014 },
+    { giveUp: (why) => (gaveUp = why), wait: instantly, awaitReconnect: async () => {} },
+  );
+  assert.equal(outcome, 'moved');
+  assert.equal(gaveUp, null, 'he follows rather than quitting');
+});
+await check('being removed from the channel is', async () => {
+  const connection = fakeConnection();
+  let gaveUp = null;
+  const outcome = await handleDisconnect(
+    connection,
+    { reason: VoiceConnectionDisconnectReason.WebSocketClose, closeCode: 4014 },
+    {
+      giveUp: (why) => (gaveUp = why),
+      wait: instantly,
+      awaitReconnect: async () => {
+        throw new Error('never came back');
+      },
+    },
+  );
+  assert.equal(outcome, 'gave up');
+  assert.match(gaveUp, /removed/);
 });
 
 console.log('\nmusic: the clickable panel');
