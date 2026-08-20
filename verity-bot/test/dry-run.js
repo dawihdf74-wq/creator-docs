@@ -39,6 +39,7 @@ import {
   parseEmbedPlaylist,
 } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
+import { buildPlaylistView, parseId, PAGE_SIZE } from '../src/music/view.js';
 import { resolveBitrate } from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
@@ -766,14 +767,20 @@ await check('escaped characters survive the scan', () => {
 });
 
 console.log('\nmusic: commands');
-await check('the whole command set parses', () => {
+await check('every command resolves to one canonical name', () => {
   const expected = {
-    'veritysong x': 'song',
+    'veritysong x': 'play',
+    veritypls: 'view',
+    verityplaylistsee: 'view',
+    verityplaylist: 'playlist',
+    'veritysaveplaylist friday': 'save',
+    'veritydeleteplaylist friday': 'delete',
+    'veritynext 3': 'next',
+    'verityjump 3': 'jump',
     verityskip: 'skip',
     veritystop: 'stop',
     veritypause: 'pause',
     verityresume: 'resume',
-    verityqueue: 'queue',
     veritynp: 'np',
     'verityloop queue': 'loop',
     verityshuffle: 'shuffle',
@@ -786,6 +793,35 @@ await check('the whole command set parses', () => {
   };
   for (const [input, command] of Object.entries(expected)) {
     assert.equal(parseMusic(input)?.command, command, `${input} should be ${command}`);
+  }
+});
+await check('the short forms mean the same thing', () => {
+  const shortcuts = {
+    'verityp x': 'play',
+    veritys: 'skip',
+    'verityn 3': 'next',
+    'verityj 3': 'jump',
+    verityq: 'playlist',
+    'veritysp friday': 'save',
+    'veritydp friday': 'delete',
+    veritysh: 'shuffle',
+    verityc: 'clear',
+    'verityr 2': 'remove',
+    'veritysd 2': 'speed',
+    'verityv 50': 'volume',
+    'verityl off': 'loop',
+    veritypa: 'pause',
+    verityre: 'resume',
+    verityd: 'leave',
+    verityh: 'help',
+  };
+  for (const [input, command] of Object.entries(shortcuts)) {
+    assert.equal(parseMusic(input)?.command, command, `${input} should be ${command}`);
+  }
+});
+await check('an unknown verity word is not a command', () => {
+  for (const input of ['verityfoo', 'verityplaylisting', 'verity', 'verity song x']) {
+    assert.equal(parseMusic(input), null, `${input} should not parse`);
   }
 });
 await check('speed is chained past what atempo allows alone', () => {
@@ -862,15 +898,6 @@ await check('access can be taken back, and never from the owners', () => {
   );
 });
 
-await check('veritysong and friends parse', () => {
-  assert.deepEqual(parseMusic('veritysong https://x.com/a.mp3'), {
-    command: 'song',
-    argument: 'https://x.com/a.mp3',
-  });
-  assert.equal(parseMusic('VeritySong  Some Song').argument, 'Some Song');
-  assert.equal(parseMusic('verityskip').command, 'skip');
-  assert.equal(parseMusic('verityq').command, 'q');
-});
 await check('ordinary chat is not a music command', () => {
   for (const line of ['verity song x', 'hello', 'verity', 'song']) {
     assert.equal(parseMusic(line), null, `should not parse: ${line}`);
@@ -1116,6 +1143,61 @@ await check('leave tears the session down', () => {
   assert.equal(musicPlayer.leave('guild-music'), true);
   assert.equal(musicPlayer.__sessions.has('guild-music'), false);
   assert.equal(musicPlayer.leave('guild-music'), false, 'and says so if he was never there');
+});
+
+console.log('\nmusic: the clickable list');
+await check('an empty list still renders, with nothing to click', () => {
+  musicPlayer.__sessions.delete('guild-view');
+  const view = buildPlaylistView('guild-view', 1);
+  assert.equal(view.components.length, 0, 'no buttons for an empty queue');
+  assert.match(view.embeds[0].data.description, /nothing playing/);
+});
+await check('every track on the page gets a button', () => {
+  musicPlayer.__sessions.delete('guild-view');
+  for (let i = 1; i <= 7; i += 1) musicPlayer.enqueue('guild-view', fakeTrack(`song ${i}`));
+  // one playing, six waiting
+  const view = buildPlaylistView('guild-view', 1);
+  const buttons = view.components.flatMap((row) => row.components);
+  const playNext = buttons.filter((button) => button.data.custom_id?.startsWith('vpl:next:'));
+  assert.equal(playNext.length, 6, 'a button per waiting track');
+  assert.deepEqual(
+    playNext.map((button) => button.data.label),
+    ['1', '2', '3', '4', '5', '6'],
+    'labelled with the numbers the commands take',
+  );
+  assert.ok(
+    view.components.every((row) => row.components.length <= 5),
+    'five to a row, as Discord requires',
+  );
+});
+await check('long lists page, and the buttons keep the real numbers', () => {
+  musicPlayer.__sessions.delete('guild-view-long');
+  for (let i = 1; i <= 26; i += 1) musicPlayer.enqueue('guild-view-long', fakeTrack(`song ${i}`));
+  const second = buildPlaylistView('guild-view-long', 2);
+  assert.equal(second.page, 2);
+  const ids = second.components
+    .flatMap((row) => row.components)
+    .map((button) => button.data.custom_id)
+    .filter((id) => id?.startsWith('vpl:next:'));
+  assert.equal(ids[0], `vpl:next:${PAGE_SIZE + 1}`, 'page two starts where page one stopped');
+  assert.ok(second.embeds[0].data.footer.text.includes('page 2'));
+
+  const beyond = buildPlaylistView('guild-view-long', 99);
+  assert.ok(beyond.page < 99, 'asking past the end lands on the last page');
+  musicPlayer.leave('guild-view-long');
+});
+await check('a press says what it is and what it is for', () => {
+  assert.deepEqual(parseId('vpl:next:7'), { action: 'next', value: 7 });
+  assert.deepEqual(parseId('vpl:page:2'), { action: 'page', value: 2 });
+  assert.equal(parseId('something:else:1'), null, 'other buttons are not his');
+});
+await check('the number on a button is the number veritynext takes', () => {
+  const view = buildPlaylistView('guild-view', 1);
+  const first = view.components[0].components[0];
+  const { value } = parseId(first.data.custom_id);
+  const moved = musicPlayer.moveToFront('guild-view', value);
+  assert.equal(moved.title, 'song 2', 'button 1 is the first waiting track');
+  musicPlayer.leave('guild-view');
 });
 
 console.log('\nmusic: quality and loading');

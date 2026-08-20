@@ -185,7 +185,8 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityskip` · `veritystop` | Skip one · stop and clear the queue |
 | `veritypause` · `verityresume` | Hold it · carry on |
 | `verityqueue` · `veritynp` | What's waiting · what's on, and how far in |
-| `verityplaylist` | Everything lined up, numbered. `verityplaylist 2` for the next page |
+| `veritypls` | **The list with a button on each track** — click one and it plays next. Also `verityplaylistsee` |
+| `verityplaylist` | The same list as plain text. `verityplaylist 2` for the next page |
 | `veritynext <n> [speed]` | That one plays next — at that speed, if you name one |
 | `verityjump <n>` | Go straight to it, binning everything in between |
 | `veritysaveplaylist <link>` | Keep a playlist for later, under its own name |
@@ -198,8 +199,20 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityvolume 50` | Percent, 0 to 200 |
 | `verityjoin` · `verityleave` | Come in · get out |
 
-Short forms work where they're obvious: `verityp`, `veritys`, `verityq`, `verityvol`,
-`veritydc`.
+**The clickable list.** `veritypls` posts the queue as an embed with a numbered ⏫ button
+on every waiting track — press one and it jumps to the front, and the message redraws
+itself in place. Ten tracks a page, with ◀ ▶ to move between pages, 🔄 to refresh and ⏭ to
+skip. The buttons obey the same DJ list the typed commands do, and the numbers on them are
+the same ones `veritynext` and `verityremove` take.
+
+**Short forms**, since some of these got long:
+
+| | | | |
+| --- | --- | --- | --- |
+| `verityp` play | `veritys` skip | `verityn` next | `verityj` jump |
+| `verityq` playlist | `veritysp` save | `veritydp` delete | `verityl` loop |
+| `veritysh` shuffle | `verityc` clear | `verityr` remove | `veritysd` speed |
+| `verityv` volume | `veritypa` pause | `verityre` resume | `verityd` leave |
 
 **Picking what plays next.** `verityplaylist` numbers everything waiting, and those
 numbers are what the other commands take:

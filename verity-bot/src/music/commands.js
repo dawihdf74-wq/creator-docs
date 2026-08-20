@@ -14,6 +14,7 @@ import {
   ytdlpList,
 } from './resolve.js';
 import * as player from './player.js';
+import { buildPlaylistView } from './view.js';
 
 const run = promisify(execFile);
 
@@ -21,14 +22,91 @@ const run = promisify(execFile);
  * The music commands, one for one with the ones people already know from
  * other music bots, with `verity` in front instead of a punctuation prefix.
  */
-const COMMAND =
-  /^verity(song|play|p|playlist|list|pl|saveplaylist|save|deleteplaylist|unsave|next|playnext|jump|skipto|skip|s|stop|pause|resume|unpause|queue|q|np|nowplaying|loop|repeat|shuffle|clear|remove|rm|speed|volume|vol|join|summon|leave|dc|disconnect|music|help)\b\s*(.*)$/is;
+/**
+ * Every command he answers to, and the short forms that mean the same thing.
+ * One table rather than a long alternation: the switch below then has one
+ * case per command, so an alias cannot quietly shadow another command.
+ */
+const ALIASES = {
+  // playing
+  song: 'play',
+  play: 'play',
+  p: 'play',
+  // the clickable list, and the plain one
+  pls: 'view',
+  playlistsee: 'view',
+  see: 'view',
+  playlist: 'playlist',
+  list: 'playlist',
+  pl: 'playlist',
+  queue: 'playlist',
+  q: 'playlist',
+  // keeping lists
+  saveplaylist: 'save',
+  save: 'save',
+  sp: 'save',
+  deleteplaylist: 'delete',
+  unsave: 'delete',
+  dp: 'delete',
+  // choosing what is next
+  next: 'next',
+  playnext: 'next',
+  n: 'next',
+  jump: 'jump',
+  skipto: 'jump',
+  j: 'jump',
+  // transport
+  skip: 'skip',
+  s: 'skip',
+  stop: 'stop',
+  pause: 'pause',
+  pa: 'pause',
+  resume: 'resume',
+  unpause: 'resume',
+  re: 'resume',
+  np: 'np',
+  nowplaying: 'np',
+  now: 'np',
+  // the queue itself
+  loop: 'loop',
+  repeat: 'loop',
+  l: 'loop',
+  shuffle: 'shuffle',
+  sh: 'shuffle',
+  clear: 'clear',
+  c: 'clear',
+  remove: 'remove',
+  rm: 'remove',
+  r: 'remove',
+  // sound
+  speed: 'speed',
+  sd: 'speed',
+  volume: 'volume',
+  vol: 'volume',
+  v: 'volume',
+  // coming and going
+  join: 'join',
+  summon: 'join',
+  leave: 'leave',
+  dc: 'leave',
+  disconnect: 'leave',
+  d: 'leave',
+  help: 'help',
+  music: 'help',
+  h: 'help',
+  commands: 'help',
+};
+
+const COMMAND = /^verity([a-z]+)\b\s*([\s\S]*)$/i;
 
 export const parse = (content) => {
   const match = String(content ?? '')
     .trim()
     .match(COMMAND);
-  return match ? { command: match[1].toLowerCase(), argument: match[2].trim() } : null;
+  if (!match) return null;
+
+  const command = ALIASES[match[1].toLowerCase()];
+  return command ? { command, argument: match[2].trim() } : null;
 };
 
 /**
@@ -222,16 +300,17 @@ export async function trackFor(input, requestedBy) {
 }
 
 const HELP = [
-  '**veritysong** <link or search> — put something on. If something is already playing, it waits its turn.',
-  '**verityplaylist** — everything lined up, numbered. `verityplaylist 2` for the next page.',
-  '**veritynext** <n> [speed] — that one goes next, at that speed if you say so.',
-  '**verityjump** <n> — straight there, binning everything in between.',
-  '**veritysaveplaylist** <name> — keep this queue. `verityplaylist <name>` puts it back.',
-  '**verityskip** · **veritystop** · **veritypause** · **verityresume**',
-  '**verityshuffle** · **verityclear** · **verityremove** <n>',
-  '**verityloop** off | track | queue — once each, one forever, or round and round.',
-  '**verityspeed** 2 · **verityvolume** 50 — everything from here on.',
-  '**verityjoin** · **verityleave**',
+  '**veritysong** <link or search> — put something on. Short: `verityp`',
+  '**veritypls** — the list, with a button on each track to play it next. Also `verityplaylistsee`',
+  '**verityplaylist** — the same list as plain text. `verityplaylist 2` for the next page. Short: `verityq`',
+  '**veritynext** <n> [speed] — that one goes next, at that speed if you name one. Short: `verityn`',
+  '**verityjump** <n> — straight there, binning everything between. Short: `verityj`',
+  '**veritysaveplaylist** <link or name> — keep a playlist. `verityplaylist <name>` puts it back. Short: `veritysp`',
+  '**verityskip** `veritys` · **veritystop** · **veritypause** `veritypa` · **verityresume** `verityre`',
+  '**verityshuffle** `veritysh` · **verityclear** `verityc` · **verityremove** <n> `verityr`',
+  '**verityloop** off | track | queue — once each, one forever, or round and round. Short: `verityl`',
+  '**verityspeed** 2 `veritysd` · **verityvolume** 50 `verityv`',
+  '**verityjoin** · **verityleave** `verityd`',
 ].join('\n');
 
 /** One page of the queue, since Discord stops reading after 2000 characters. */
@@ -294,14 +373,12 @@ export async function handle({ command, argument }, message) {
     ]);
   }
 
-  if (command === 'help' || command === 'music') return HELP;
+  if (command === 'help') return HELP;
 
   const voiceChannel = message.member?.voice?.channel;
 
   switch (command) {
     case 'leave':
-    case 'dc':
-    case 'disconnect':
       return player.leave(guildId)
         ? pick([
             'fine. i did not want to be in there anyway. :|',
@@ -309,33 +386,12 @@ export async function handle({ command, argument }, message) {
           ])
         : 'i am not in a voice channel to leave.';
 
-    case 'queue':
-    case 'q': {
-      const current = player.nowPlaying(guildId);
-      const rest = player.queued(guildId);
-      const { loop, speed, paused } = player.settings(guildId);
-      if (!current && !rest.length) return 'nothing queued. the silence is nice, actually.';
-      return [
-        current ? `**now**: ${current.title} _(${current.requestedBy})_` : '**now**: nothing',
-        ...rest
-          .slice(0, 10)
-          .map((track, index) => `${index + 1}. ${track.title} _(${track.requestedBy})_`),
-        rest.length > 10 ? `…and ${rest.length - 10} more` : '',
-        [
-          loop !== 'off' ? `loop: ${loop}` : '',
-          speed !== 1 ? `speed: ${speed}x` : '',
-          paused ? 'paused' : '',
-        ]
-          .filter(Boolean)
-          .join(' · '),
-      ]
-        .filter(Boolean)
-        .join('\n');
+    case 'view': {
+      const { embeds, components } = buildPlaylistView(guildId, Number(argument) || 1);
+      return { embeds, components };
     }
 
-    case 'playlist':
-    case 'list':
-    case 'pl': {
+    case 'playlist': {
       const wanted = argument.trim();
 
       if (!wanted || /^\d+$/.test(wanted)) return renderPlaylist(guildId, Number(wanted) || 1);
@@ -373,7 +429,6 @@ export async function handle({ command, argument }, message) {
       return `**${saved.name}** is back — ${added} tracks${startedPlaying ? '' : ', behind what is already on'}.`;
     }
 
-    case 'saveplaylist':
     case 'save': {
       const asked = argument.trim();
 
@@ -428,8 +483,7 @@ export async function handle({ command, argument }, message) {
       return `kept **${name}** — ${entries.length} tracks. \`verityplaylist ${name}\` brings it back. i will not forget it. :)`;
     }
 
-    case 'deleteplaylist':
-    case 'unsave': {
+    case 'delete': {
       const name = argument.trim();
       if (!name) return 'delete which one? `verityplaylist saved` lists them.';
       return store.deletePlaylist(guildId, name)
@@ -437,8 +491,7 @@ export async function handle({ command, argument }, message) {
         : `there is nothing called "${name}".`;
     }
 
-    case 'next':
-    case 'playnext': {
+    case 'next': {
       const [position, rate] = argument.split(/\s+/);
       const speed = rate ? Number(rate) : null;
       if (speed !== null && (!Number.isFinite(speed) || speed < 0.25 || speed > 4)) {
@@ -452,15 +505,13 @@ export async function handle({ command, argument }, message) {
         : `**${moved.title}** is next. the rest can wait a little longer.`;
     }
 
-    case 'jump':
-    case 'skipto': {
+    case 'jump': {
       const jumped = player.jumpTo(guildId, Number(argument));
       if (!jumped) return 'there is nothing at that number. `verityplaylist` shows what there is.';
       return `straight to **${jumped.track.title}**${jumped.skipped ? `, with ${jumped.skipped} thrown out on the way` : ''}.`;
     }
 
-    case 'np':
-    case 'nowplaying': {
+    case 'np': {
       const current = player.nowPlaying(guildId);
       if (!current) return 'nothing. put something on.';
       const { speed, position } = player.settings(guildId);
@@ -471,9 +522,7 @@ export async function handle({ command, argument }, message) {
       return `**${current.title}** — put on by ${current.requestedBy} · ${minutes}:${seconds}${speed !== 1 ? ` · ${speed}x` : ''}`;
     }
 
-    case 'skip':
-    case 's':
-    case 'next': {
+    case 'skip': {
       const skipped = player.skip(guildId);
       return skipped ? `skipped **${skipped.title}**. good. it was awful.` : 'nothing to skip.';
     }
@@ -489,11 +538,9 @@ export async function handle({ command, argument }, message) {
         : 'nothing is playing.';
 
     case 'resume':
-    case 'unpause':
       return player.resume(guildId) ? 'back on.' : 'nothing to resume.';
 
-    case 'loop':
-    case 'repeat': {
+    case 'loop': {
       const wanted = argument.toLowerCase();
       const mode = ['track', 'song', 'one'].includes(wanted)
         ? 'track'
@@ -523,8 +570,7 @@ export async function handle({ command, argument }, message) {
         : 'the queue is already empty. nothing left to take.';
     }
 
-    case 'remove':
-    case 'rm': {
+    case 'remove': {
       const removed = player.remove(guildId, Number(argument));
       return removed
         ? `**${removed.title}** removed. it will not be missed.`
@@ -541,8 +587,7 @@ export async function handle({ command, argument }, message) {
       return `${speed}x.${fromStart ? ' had to start it again from the top.' : resumedAt > 1 ? ' picked it back up where it was.' : ''}`;
     }
 
-    case 'volume':
-    case 'vol': {
+    case 'volume': {
       const percent = Number(argument);
       if (!Number.isFinite(percent) || percent < 0 || percent > 200) {
         return 'a number between 0 and 200. `verityvolume 50` is half.';
@@ -568,7 +613,7 @@ export async function handle({ command, argument }, message) {
     return `i am not allowed to speak in ${voiceChannel.name}. sort your permissions out.`;
   }
 
-  if (command === 'join' || command === 'summon') {
+  if (command === 'join') {
     await player.join(voiceChannel, events(message));
     return `fine. i am in ${voiceChannel.name}. this had better be worth it.`;
   }

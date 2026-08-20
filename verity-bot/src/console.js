@@ -124,7 +124,7 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       .replace(/^\//, '')
       // The Discord commands are muscle memory by now; accept them here too.
       .replace(
-        /^verity(?=(song|play|p|playlist|list|pl|next|jump|skip|s|stop|pause|resume|queue|q|np|nowplaying|loop|shuffle|clear|remove|speed|volume|vol|join|leave|dc)$)/i,
+        /^verity(?=(song|play|p|playlist|list|pl|next|n|jump|j|skip|s|stop|pause|pa|resume|re|queue|q|np|nowplaying|loop|l|shuffle|sh|clear|c|remove|r|speed|sd|volume|vol|v|join|leave|dc|d)$)/i,
         '',
       )
       .toLowerCase();
@@ -200,12 +200,15 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       }
 
       case 'pause':
+      case 'pa':
         return out(musicPlayer.pause(musicGuildId()) ? '  paused' : '  nothing playing');
 
       case 'resume':
+      case 're':
         return out(musicPlayer.resume(musicGuildId()) ? '  playing' : '  nothing to resume');
 
-      case 'speed': {
+      case 'speed':
+      case 'sd': {
         const speed = Number(rest[0]);
         if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) {
           return out('  speed <0.25-4>, e.g. speed 2');
@@ -215,7 +218,8 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       }
 
       case 'volume':
-      case 'vol': {
+      case 'vol':
+      case 'v': {
         const percent = Number(rest[0]);
         if (!Number.isFinite(percent) || percent < 0 || percent > 200) {
           return out('  volume <0-200>, e.g. volume 50');
@@ -224,7 +228,8 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         return out(`  ${percent}%`);
       }
 
-      case 'loop': {
+      case 'loop':
+      case 'l': {
         const wanted = (rest[0] ?? '').toLowerCase();
         const mode = ['track', 'song'].includes(wanted)
           ? 'track'
@@ -239,17 +244,21 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       }
 
       case 'shuffle':
+      case 'sh':
         return out(`  shuffled ${musicPlayer.shuffle(musicGuildId())}`);
 
       case 'clear':
+      case 'c':
         return out(`  cleared ${musicPlayer.clear(musicGuildId())}`);
 
-      case 'remove': {
+      case 'remove':
+      case 'r': {
         const removed = musicPlayer.remove(musicGuildId(), Number(rest[0]));
         return out(removed ? `  removed ${removed.title}` : '  no track at that number');
       }
 
-      case 'next': {
+      case 'next':
+      case 'n': {
         const speed = rest[1] ? Number(rest[1]) : null;
         const moved = musicPlayer.moveToFront(musicGuildId(), Number(rest[0]), speed);
         return out(
@@ -259,7 +268,8 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         );
       }
 
-      case 'jump': {
+      case 'jump':
+      case 'j': {
         const jumped = musicPlayer.jumpTo(musicGuildId(), Number(rest[0]));
         return out(jumped ? `  jumped to ${jumped.track.title}` : '  no track at that number');
       }
@@ -292,7 +302,8 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       }
 
       case 'leave':
-      case 'dc': {
+      case 'dc':
+      case 'd': {
         const left = musicPlayer.leave(musicGuildId());
         state.voice = null;
         return out(left ? '  out.' : '  he is not in a voice channel.');

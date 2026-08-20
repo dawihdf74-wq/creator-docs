@@ -13,7 +13,9 @@ import { mentionsName } from './addressed.js';
 import { looksLikeQuestion } from './question.js';
 import { match as matchAnswer, fill } from './faq.js';
 import { startConsole } from './console.js';
-import { parse as parseMusic, handle as handleMusic } from './music/commands.js';
+import { parse as parseMusic, handle as handleMusic, isDj } from './music/commands.js';
+import { buildPlaylistView, parseId } from './music/view.js';
+import * as musicPlayer from './music/player.js';
 import { leave as leaveVoice } from './music/player.js';
 import { isOwner } from './owners.js';
 import { notice } from './reply.js';
@@ -97,6 +99,38 @@ client.once(Events.ClientReady, (ready) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Buttons on the playlist embed.
+  if (interaction.isButton()) {
+    const press = parseId(interaction.customId);
+    if (!press) return;
+
+    if (!isDj(interaction.member, interaction.guildId)) {
+      return interaction
+        .reply({
+          content: 'no. that list is not yours to rearrange. :|',
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => {});
+    }
+
+    let note;
+    if (press.action === 'next') {
+      const moved = musicPlayer.moveToFront(interaction.guildId, press.value);
+      note = moved
+        ? `${moved.title} is next, because ${interaction.member?.displayName ?? interaction.user.username} said so`
+        : 'that one is already gone';
+    }
+    if (press.action === 'skip') {
+      const skipped = musicPlayer.skip(interaction.guildId);
+      note = skipped ? `skipped ${skipped.title}` : 'nothing to skip';
+    }
+
+    // Redraw in place: the list has usually changed under the press.
+    const page = press.action === 'next' ? 1 : press.value;
+    const { embeds, components } = buildPlaylistView(interaction.guildId, page, { note });
+    return interaction.update({ embeds, components }).catch(() => {});
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const command = byName.get(interaction.commandName);
@@ -137,7 +171,14 @@ client.on(Events.MessageCreate, async (message) => {
   if (musicCommand) {
     try {
       const reply = await handleMusic(musicCommand, message);
-      if (reply) await message.reply({ content: reply, allowedMentions: { repliedUser: false } });
+      // A command may answer with a line, or with a whole embed to click on.
+      if (reply) {
+        await message.reply(
+          typeof reply === 'string'
+            ? { content: reply, allowedMentions: { repliedUser: false } }
+            : { ...reply, allowedMentions: { repliedUser: false } },
+        );
+      }
     } catch (error) {
       console.error('[verity] music:', error);
       await message
