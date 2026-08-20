@@ -52,6 +52,7 @@ export function getGuild(guildId) {
       settings: { ...config.defaults },
       protected: [],
       faq: [],
+      dj: { users: [], roles: [] },
     };
     save();
   }
@@ -59,6 +60,9 @@ export function getGuild(guildId) {
   guild.settings = { ...config.defaults, ...guild.settings };
   guild.protected ??= [];
   guild.faq ??= [];
+  guild.dj ??= { users: [], roles: [] };
+  guild.dj.users ??= [];
+  guild.dj.roles ??= [];
   guild.channels ??= {};
   return guild;
 }
@@ -135,6 +139,37 @@ export const listAnswers = (guildId) => getGuild(guildId).faq;
 export function countAnswerHit(entry) {
   entry.hits = (entry.hits ?? 0) + 1;
   save();
+}
+
+/**
+ * Who may use the music commands. An empty list means everyone can — the DJ
+ * list only starts restricting once something is on it.
+ */
+export function addDj(guildId, { userId, roleId }) {
+  const dj = getGuild(guildId).dj;
+  if (userId && !dj.users.includes(userId)) dj.users.push(userId);
+  if (roleId && !dj.roles.includes(roleId)) dj.roles.push(roleId);
+  save();
+  return dj;
+}
+
+export function removeDj(guildId, { userId, roleId }) {
+  const dj = getGuild(guildId).dj;
+  if (userId) dj.users = dj.users.filter((id) => id !== userId);
+  if (roleId) dj.roles = dj.roles.filter((id) => id !== roleId);
+  save();
+  return dj;
+}
+
+export const listDj = (guildId) => getGuild(guildId).dj;
+
+export function clearDj(guildId) {
+  const dj = getGuild(guildId).dj;
+  const had = dj.users.length + dj.roles.length;
+  dj.users = [];
+  dj.roles = [];
+  save();
+  return had;
 }
 
 /** Flush pending writes on shutdown. */

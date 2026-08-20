@@ -156,6 +156,31 @@ export const data = new SlashCommandBuilder()
           ),
       ),
   )
+  .addSubcommandGroup((group) =>
+    group
+      .setName('dj')
+      .setDescription('Who may use the veritysong music commands')
+      .addSubcommand((sub) =>
+        sub
+          .setName('add')
+          .setDescription('Let a person or a role use the music commands')
+          .addUserOption((option) => option.setName('user').setDescription('A person'))
+          .addRoleOption((option) =>
+            option.setName('role').setDescription('Everyone with this role'),
+          ),
+      )
+      .addSubcommand((sub) =>
+        sub
+          .setName('remove')
+          .setDescription('Take it away again')
+          .addUserOption((option) => option.setName('user').setDescription('A person'))
+          .addRoleOption((option) => option.setName('role').setDescription('A role')),
+      )
+      .addSubcommand((sub) => sub.setName('list').setDescription('Who can use the music commands'))
+      .addSubcommand((sub) =>
+        sub.setName('clear').setDescription('Back to everyone being allowed'),
+      ),
+  )
   .addSubcommand((sub) =>
     sub
       .setName('say')
@@ -246,6 +271,50 @@ export async function execute(interaction) {
           .join('\n')
       : '_Nowhere. He is waiting in the package._';
     return interaction.reply(notice(`**Verity is installed in:**\n${body}`));
+  }
+
+  if (group === 'dj') {
+    const user = interaction.options.getUser('user');
+    const role = interaction.options.getRole('role');
+
+    if (sub === 'add' || sub === 'remove') {
+      if (!user && !role) return interaction.reply(notice('Name a person or a role.'));
+      const change = sub === 'add' ? store.addDj : store.removeDj;
+      change(guildId, { userId: user?.id, roleId: role?.id });
+      const who = [user, role].filter(Boolean).join(' and ');
+      return interaction.reply(
+        notice(
+          sub === 'add'
+            ? `${who} can use the music commands now.`
+            : `${who} cannot use the music commands any more.`,
+        ),
+      );
+    }
+
+    if (sub === 'clear') {
+      const had = store.clearDj(guildId);
+      return interaction.reply(
+        notice(had ? 'Cleared. Everyone can queue music again.' : 'Everyone could already.'),
+      );
+    }
+
+    const dj = store.listDj(guildId);
+    if (!dj.users.length && !dj.roles.length) {
+      return interaction.reply(
+        notice('**Anyone** can use the music commands. Add someone to start restricting it.'),
+      );
+    }
+    return interaction.reply(
+      notice(
+        [
+          '**Music commands are limited to:**',
+          dj.roles.map((id) => `<@&${id}>`).join(', '),
+          dj.users.map((id) => `<@${id}>`).join(', '),
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      ),
+    );
   }
 
   if (group === 'faq') {

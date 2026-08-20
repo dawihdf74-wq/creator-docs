@@ -1,14 +1,26 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config } from '../config.js';
-import { classify, spotifyTrack, streamDirect, streamViaYtdlp, ytdlpEnabled } from './resolve.js';
+import * as store from '../store.js';
+import {
+  classify,
+  spotifyList,
+  spotifyTrack,
+  streamDirect,
+  streamViaYtdlp,
+  ytdlpEnabled,
+  ytdlpList,
+} from './resolve.js';
 import * as player from './player.js';
 
 const run = promisify(execFile);
 
-/** `veritysong <thing>`, and the handful of siblings that go with it. */
+/**
+ * The music commands, one for one with the ones people already know from
+ * other music bots, with `verity` in front instead of a punctuation prefix.
+ */
 const COMMAND =
-  /^verity(song|play|skip|next|stop|queue|q|np|nowplaying|join|leave|dc|disconnect|music|help)\b\s*(.*)$/is;
+  /^verity(song|play|p|skip|s|next|stop|pause|resume|unpause|queue|q|np|nowplaying|loop|repeat|shuffle|clear|remove|rm|speed|volume|vol|join|summon|leave|dc|disconnect|music|help)\b\s*(.*)$/is;
 
 export const parse = (content) => {
   const match = String(content ?? '')
@@ -16,6 +28,14 @@ export const parse = (content) => {
     .match(COMMAND);
   return match ? { command: match[1].toLowerCase(), argument: match[2].trim() } : null;
 };
+
+/** Empty DJ list means everybody. Once anything is on it, only they can. */
+export function isDj(member, guildId) {
+  const dj = store.listDj(guildId);
+  if (!dj.users.length && !dj.roles.length) return true;
+  if (dj.users.includes(member?.id)) return true;
+  return dj.roles.some((roleId) => member?.roles?.cache?.has(roleId));
+}
 
 const NO_SOURCE = [
   'i can hear it. i cannot fetch it.',
@@ -32,7 +52,6 @@ const prettyName = (url) => {
   }
 };
 
-/** Asks yt-dlp what a page is actually called, so the queue reads properly. */
 async function titleOf(url) {
   try {
     const { stdout } = await run(
@@ -48,11 +67,18 @@ async function titleOf(url) {
   }
 }
 
+const searchTrack = (title, search, requestedBy) => ({
+  title,
+  requestedBy,
+  seekable: false, // piped from the resolver, so a speed change restarts it
+  open: (options) => streamViaYtdlp(search, { search: true, ...options }),
+});
+
 /**
- * Turns whatever was typed into a queueable track.
- * @returns {Promise<{title: string, requestedBy: string, open: () => {stream: any, kill: () => void}}>}
+ * Everything the input asked for: one track, or all of a playlist.
+ * @returns {Promise<{tracks: Array, label: string}>}
  */
-export async function trackFor(input, requestedBy) {
+export async function tracksFor(input, requestedBy) {
   const target = classify(input);
 
   switch (target.kind) {
@@ -60,42 +86,99 @@ export async function trackFor(input, requestedBy) {
       throw new Error('song what? give me a link, friend.');
 
     case 'direct':
-      return { title: prettyName(target.url), requestedBy, open: () => streamDirect(target.url) };
-
-    case 'file':
-      return { title: prettyName(target.path), requestedBy, open: () => streamDirect(target.path) };
+    case 'file': {
+      const source = target.url ?? target.path;
+      return {
+        tracks: [
+          {
+            title: prettyName(source),
+            requestedBy,
+            seekable: true,
+            open: (options) => streamDirect(source, options),
+          },
+        ],
+        label: prettyName(source),
+      };
+    }
 
     case 'spotify': {
-      // Spotify hands out names, never audio — see resolve.js.
+      if (target.type !== 'track') {
+        // A playlist or an album: every track, in order.
+        const items = await spotifyList(target);
+        if (!ytdlpEnabled()) throw new Error(`that is ${items.length} tracks, and ${NO_SOURCE}`);
+        return {
+          tracks: items.map((item) => searchTrack(item.title, item.search, requestedBy)),
+          label: `${items.length} tracks from that ${target.type}`,
+        };
+      }
+
       const meta = await spotifyTrack(target);
-      const title = [meta.artist, meta.title].filter(Boolean).join(' — ');
+      const title = [meta.artist, meta.title].filter(Boolean).join(' - ');
       if (!ytdlpEnabled()) {
         throw new Error(
           `that is "${title}". spotify will not give anyone the audio, and ${NO_SOURCE}`,
         );
       }
-      return { title, requestedBy, open: () => streamViaYtdlp(meta.search, { search: true }) };
+      return { tracks: [searchTrack(title, meta.search, requestedBy)], label: title };
     }
 
     case 'page': {
       if (!ytdlpEnabled()) throw new Error(NO_SOURCE);
+
+      // A link that carries a playlist gets the whole playlist.
+      if (/[?&]list=/.test(target.url)) {
+        const items = await ytdlpList(target.url);
+        if (items.length > 1) {
+          return {
+            tracks: items.map((item) => ({
+              title: item.title,
+              requestedBy,
+              seekable: false,
+              open: (options) => streamViaYtdlp(item.url, options),
+            })),
+            label: `${items.length} tracks from that playlist`,
+          };
+        }
+      }
+
+      const title = await titleOf(target.url);
       return {
-        title: await titleOf(target.url),
-        requestedBy,
-        open: () => streamViaYtdlp(target.url),
+        tracks: [
+          {
+            title,
+            requestedBy,
+            seekable: false,
+            open: (options) => streamViaYtdlp(target.url, options),
+          },
+        ],
+        label: title,
       };
     }
 
     default: {
       if (!ytdlpEnabled()) throw new Error(NO_SOURCE);
       return {
-        title: target.query,
-        requestedBy,
-        open: () => streamViaYtdlp(target.query, { search: true }),
+        tracks: [searchTrack(target.query, target.query, requestedBy)],
+        label: target.query,
       };
     }
   }
 }
+
+/** Kept for the console, which only ever wants one thing at a time. */
+export async function trackFor(input, requestedBy) {
+  const { tracks } = await tracksFor(input, requestedBy);
+  return tracks[0];
+}
+
+const HELP = [
+  '**veritysong** <link or search> — play it, or add it to the queue',
+  '**verityskip** · **veritystop** · **veritypause** · **verityresume**',
+  '**verityqueue** · **veritynp** · **verityshuffle** · **verityclear** · **verityremove** <n>',
+  '**verityloop** off | track | queue',
+  '**verityspeed** 2 — double speed. **verityvolume** 50',
+  '**verityjoin** · **verityleave**',
+].join('\n');
 
 /**
  * Runs a music command for a message.
@@ -103,57 +186,144 @@ export async function trackFor(input, requestedBy) {
  */
 export async function handle({ command, argument }, message) {
   const guildId = message.guildId;
+
+  if (command === 'help' || command === 'music') return HELP;
+
+  if (!isDj(message.member, guildId)) {
+    return 'you are not a dj. ask someone who is. :|';
+  }
+
   const voiceChannel = message.member?.voice?.channel;
 
-  if (command === 'help' || command === 'music') {
-    return [
-      '**veritysong** <link or search> — play it, or put it in the queue',
-      '**verityskip** · **veritystop** · **verityqueue** · **veritynp**',
-      '**verityjoin** · **verityleave**',
-      'links: spotify, direct audio files, radio streams' +
-        (ytdlpEnabled() ? ', youtube and anything else yt-dlp handles' : ''),
-    ].join('\n');
+  switch (command) {
+    case 'leave':
+    case 'dc':
+    case 'disconnect':
+      return player.leave(guildId)
+        ? 'fine. i did not want to be in there anyway. :|'
+        : 'i am not in a channel.';
+
+    case 'queue':
+    case 'q': {
+      const current = player.nowPlaying(guildId);
+      const rest = player.queued(guildId);
+      const { loop, speed, paused } = player.settings(guildId);
+      if (!current && !rest.length) return 'nothing queued. the silence is nice, actually.';
+      return [
+        current ? `**now**: ${current.title} _(${current.requestedBy})_` : '**now**: nothing',
+        ...rest
+          .slice(0, 10)
+          .map((track, index) => `${index + 1}. ${track.title} _(${track.requestedBy})_`),
+        rest.length > 10 ? `…and ${rest.length - 10} more` : '',
+        [
+          loop !== 'off' ? `loop: ${loop}` : '',
+          speed !== 1 ? `speed: ${speed}x` : '',
+          paused ? 'paused' : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      ]
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    case 'np':
+    case 'nowplaying': {
+      const current = player.nowPlaying(guildId);
+      if (!current) return 'nothing. put something on.';
+      const { speed, position } = player.settings(guildId);
+      const minutes = Math.floor(position / 60);
+      const seconds = Math.floor(position % 60)
+        .toString()
+        .padStart(2, '0');
+      return `**${current.title}** — put on by ${current.requestedBy} · ${minutes}:${seconds}${speed !== 1 ? ` · ${speed}x` : ''}`;
+    }
+
+    case 'skip':
+    case 's':
+    case 'next': {
+      const skipped = player.skip(guildId);
+      return skipped ? `skipped **${skipped.title}**. good. it was awful.` : 'nothing to skip.';
+    }
+
+    case 'stop': {
+      const dropped = player.stop(guildId);
+      return `stopped${dropped ? `, and threw away ${dropped} queued` : ''}. finally some quiet. :|`;
+    }
+
+    case 'pause':
+      return player.pause(guildId)
+        ? 'paused. i will hold it. do not be long.'
+        : 'nothing is playing.';
+
+    case 'resume':
+    case 'unpause':
+      return player.resume(guildId) ? 'back on.' : 'nothing to resume.';
+
+    case 'loop':
+    case 'repeat': {
+      const wanted = argument.toLowerCase();
+      const mode = ['track', 'song', 'one'].includes(wanted)
+        ? 'track'
+        : ['queue', 'all'].includes(wanted)
+          ? 'queue'
+          : ['off', 'none', 'stop'].includes(wanted)
+            ? 'off'
+            : null;
+      if (!mode) return 'loop what? `verityloop track`, `verityloop queue`, or `verityloop off`.';
+      player.setLoop(guildId, mode);
+      return mode === 'off'
+        ? 'fine. once each.'
+        : `looping the ${mode}. forever. like this. with you. :D`;
+    }
+
+    case 'shuffle': {
+      const shuffled = player.shuffle(guildId);
+      return shuffled
+        ? `shuffled ${shuffled}. hope you liked the old order.`
+        : 'nothing to shuffle.';
+    }
+
+    case 'clear': {
+      const dropped = player.clear(guildId);
+      return dropped
+        ? `threw away ${dropped}. the one playing survives.`
+        : 'the queue is already empty.';
+    }
+
+    case 'remove':
+    case 'rm': {
+      const removed = player.remove(guildId, Number(argument));
+      return removed
+        ? `removed **${removed.title}**.`
+        : 'no track at that number. check `verityqueue`.';
+    }
+
+    case 'speed': {
+      const speed = Number(argument);
+      if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) {
+        return 'a number between 0.25 and 4. `verityspeed 2` for twice as fast.';
+      }
+      const { restarted, resumedAt, fromStart } = player.setSpeed(guildId, speed);
+      if (!restarted) return `${speed}x, from the next track on.`;
+      return `${speed}x.${fromStart ? ' had to start it again from the top.' : resumedAt > 1 ? ' picked it back up where it was.' : ''}`;
+    }
+
+    case 'volume':
+    case 'vol': {
+      const percent = Number(argument);
+      if (!Number.isFinite(percent) || percent < 0 || percent > 200) {
+        return 'a number between 0 and 200. `verityvolume 50` is half.';
+      }
+      const { restarted, fromStart } = player.setVolume(guildId, percent / 100);
+      return `${percent}%.${restarted && fromStart ? ' started it again from the top.' : ''}`;
+    }
+
+    default:
+      break;
   }
 
-  if (command === 'leave' || command === 'dc' || command === 'disconnect') {
-    return player.leave(guildId)
-      ? 'fine. i did not want to be in there anyway. :|'
-      : 'i am not in a channel.';
-  }
-
-  if (command === 'queue' || command === 'q') {
-    const current = player.nowPlaying(guildId);
-    const rest = player.queued(guildId);
-    if (!current && !rest.length) return 'nothing queued. the silence is nice, actually.';
-    return [
-      current ? `**now**: ${current.title} _(${current.requestedBy})_` : '**now**: nothing',
-      ...rest
-        .slice(0, 10)
-        .map((track, index) => `${index + 1}. ${track.title} _(${track.requestedBy})_`),
-      rest.length > 10 ? `…and ${rest.length - 10} more` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  if (command === 'np' || command === 'nowplaying') {
-    const current = player.nowPlaying(guildId);
-    return current
-      ? `**${current.title}** — put on by ${current.requestedBy}`
-      : 'nothing. put something on.';
-  }
-
-  if (command === 'skip' || command === 'next') {
-    const skipped = player.skip(guildId);
-    return skipped ? `skipped **${skipped.title}**. good. it was awful.` : 'nothing to skip.';
-  }
-
-  if (command === 'stop') {
-    const dropped = player.stop(guildId);
-    return `stopped${dropped ? `, and threw away ${dropped} queued` : ''}. finally some quiet. :|`;
-  }
-
-  // join / song / play all need the requester to be in a voice channel.
+  // join / song / play need the person asking to be in a voice channel.
   if (!voiceChannel) return 'get into a voice channel first, obviously.';
 
   const permissions = voiceChannel.permissionsFor(message.client.user);
@@ -161,21 +331,27 @@ export async function handle({ command, argument }, message) {
     return `i am not allowed to speak in ${voiceChannel.name}. sort your permissions out.`;
   }
 
-  if (command === 'join') {
+  if (command === 'join' || command === 'summon') {
     await player.join(voiceChannel, events(message));
     return `fine. i am in ${voiceChannel.name}. this had better be worth it.`;
   }
 
   if (!argument) return 'song what? give me a link, friend.';
 
-  const track = await trackFor(argument, message.member?.displayName ?? message.author.username);
+  const { tracks, label } = await tracksFor(
+    argument,
+    message.member?.displayName ?? message.author.username,
+  );
   await player.join(voiceChannel, events(message));
-  const { position } = player.enqueue(guildId, track);
 
-  // Position 0 means it started immediately, and the playing event will announce it.
-  return position === 0
-    ? null
-    : `**${track.title}** is number ${position} in the queue. wait your turn.`;
+  if (tracks.length > 1) {
+    const { added, startedPlaying } = player.enqueueAll(guildId, tracks);
+    return `queued **${label}** — ${added} tracks${startedPlaying ? '' : ', behind what is already on'}.`;
+  }
+
+  const { position } = player.enqueue(guildId, tracks[0]);
+  // Position 0 started immediately, and the playing event announces that.
+  return position === 0 ? null : `**${label}** is number ${position} in the queue. wait your turn.`;
 }
 
 /** Playback events talk back to the channel the command came from. */

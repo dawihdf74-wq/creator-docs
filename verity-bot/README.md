@@ -181,14 +181,34 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 
 | Command | |
 | --- | --- |
-| `veritysong <link or search>` | Play it, or add it to the queue |
+| `veritysong <link or search>` | Play it. Something already on? It goes in the queue |
 | `verityskip` · `veritystop` | Skip one · stop and clear the queue |
-| `verityqueue` · `veritynp` | What's waiting · what's on |
+| `veritypause` · `verityresume` | Hold it · carry on |
+| `verityqueue` · `veritynp` | What's waiting · what's on, and how far in |
+| `verityshuffle` · `verityclear` · `verityremove <n>` | Reorder the queue |
+| `verityloop track\|queue\|off` | Repeat one, repeat everything, or stop |
+| `verityspeed 2` | Double speed. Anything from 0.25 to 4 |
+| `verityvolume 50` | Percent, 0 to 200 |
 | `verityjoin` · `verityleave` | Come in · get out |
+
+Short forms work where they're obvious: `verityp`, `veritys`, `verityq`, `verityvol`,
+`veritydc`.
+
+**Playlists.** A Spotify playlist or album link queues every track on it (up to 50), and
+so does a YouTube link carrying `list=`. Spotify playlists need the API credentials below —
+the no-credentials fallback can only read single tracks.
+
+**Who's allowed.** By default anyone can queue music. `/verity dj add role:@DJ` starts
+restricting it: once anything is on the list, only those people and roles can use the
+music commands. `/verity dj list` shows it, `/verity dj clear` opens it back up.
 
 Those are **Discord** commands — type them in a channel, with yourself in a voice channel.
 He joins whatever voice channel you are in, announces each track in the channel you typed
-in, and leaves on his own after five minutes of nothing. The terminal console has the same
+in, and leaves on his own after five minutes of nothing.
+
+Speed and volume are applied by re-encoding the source, since Opus can't be stretched
+after the fact. A file or radio stream picks up where it was; anything piped through the
+resolver starts the track again, and he says so rather than quietly losing your place. The terminal console has the same
 controls, where you name the voice channel yourself: `join #voice-chat` then `play <link>`. FFmpeg ships with the bot,
 so nothing extra is needed for the sources below.
 
@@ -285,7 +305,10 @@ fine if that is how your fingers work.
 | `faq …` | Manage canned answers, below |
 | `join #voice-channel` | Get into a voice channel |
 | `play <link or search>` | Play it there — `veritysong <link>` works here too |
-| `skip` · `stop` · `queue` · `leave` | The rest of the music controls |
+| `skip` · `stop` · `pause` · `resume` | Playback |
+| `queue` · `shuffle` · `clear` · `remove <n>` | The queue |
+| `speed 2` · `volume 50` · `loop track` | Same controls as in Discord |
+| `leave` | Get out of the voice channel |
 | `quota [reset]` | Question budgets |
 | `models` | The fallback chain and what's spent |
 | `quit` | Shut him down |

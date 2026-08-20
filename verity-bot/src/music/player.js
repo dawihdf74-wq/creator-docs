@@ -12,9 +12,13 @@ import {
 /**
  * One queue per server, and the voice connection that plays it.
  *
- * A track is `{ title, requestedBy, open() }`, where open() returns
- * `{ stream, kill }` — the kill is important: every source here is a child
+ * A track is `{ title, requestedBy, seekable, open(options) }`, where open()
+ * returns `{ stream, kill }`. The kill matters: every source is a child
  * process, and a skipped song has to stop costing CPU immediately.
+ *
+ * Speed and volume are applied by re-opening the source with an ffmpeg filter,
+ * because Opus arrives already encoded and cannot be stretched afterwards.
+ * Sources that can seek resume where they were; the rest start again.
  */
 const sessions = new Map();
 
@@ -32,13 +36,29 @@ function session(guildId) {
     connection: null,
     queue: [],
     current: null,
+    resource: null,
+    seekBase: 0,
+    speed: 1,
+    volume: 1,
+    loop: 'off', // off | track | queue
+    restarting: false,
     idleTimer: null,
     onEvent: () => {},
   };
 
   player.on(AudioPlayerStatus.Idle, () => {
+    // A restart stops the player on purpose; that is not the track ending.
+    if (existing.restarting) return;
+
+    const finished = existing.current?.track;
     existing.current?.kill?.();
     existing.current = null;
+    existing.resource = null;
+    existing.seekBase = 0;
+
+    if (finished && existing.loop === 'track') existing.queue.unshift(finished);
+    else if (finished && existing.loop === 'queue') existing.queue.push(finished);
+
     advance(existing);
   });
 
@@ -54,28 +74,39 @@ function session(guildId) {
   return existing;
 }
 
+function start(state, track, seek = 0) {
+  const { stream, kill } = track.open({ speed: state.speed, volume: state.volume, seek });
+  const resource = createAudioResource(stream, { inputType: StreamType.OggOpus });
+  state.current = { track, kill };
+  state.resource = resource;
+  state.seekBase = seek;
+  state.player.play(resource);
+}
+
 function advance(state) {
   clearTimeout(state.idleTimer);
 
   const next = state.queue.shift();
   if (!next) {
     state.onEvent({ type: 'empty' });
-    // Nothing left: give it a few minutes, then stop occupying the channel.
     state.idleTimer = setTimeout(() => leave(state.guildId), IDLE_MS);
     state.idleTimer.unref?.();
     return;
   }
 
   try {
-    const { stream, kill } = next.open();
-    const resource = createAudioResource(stream, { inputType: StreamType.OggOpus });
-    state.current = { track: next, kill };
-    state.player.play(resource);
+    start(state, next);
     state.onEvent({ type: 'playing', track: next });
   } catch (error) {
     state.onEvent({ type: 'error', message: error.message, track: next });
     advance(state);
   }
+}
+
+/** How far into the source we are, in seconds, allowing for playback speed. */
+function elapsed(state) {
+  const played = (state.resource?.playbackDuration ?? 0) / 1000;
+  return state.seekBase + played * state.speed;
 }
 
 /** Connects to a voice channel, reusing the connection if he is already there. */
@@ -95,7 +126,7 @@ export async function join(voiceChannel, onEvent) {
   });
 
   state.connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    // A move or a blip looks the same at first; wait to see which it was.
+    // A move and a dropped connection look the same at first.
     try {
       await Promise.race([
         entersState(state.connection, VoiceConnectionStatus.Signalling, 5000),
@@ -115,18 +146,30 @@ export function enqueue(guildId, track) {
   const state = session(guildId);
   state.queue.push(track);
 
-  const idle = state.player.state.status === AudioPlayerStatus.Idle;
-  if (idle && !state.current) {
+  if (!state.current && state.player.state.status === AudioPlayerStatus.Idle) {
     advance(state);
     return { position: 0 };
   }
   return { position: state.queue.length };
 }
 
+/** Adds a whole playlist, starting the first one if nothing is playing. */
+export function enqueueAll(guildId, tracks) {
+  const state = session(guildId);
+  const startedEmpty = !state.current && state.player.state.status === AudioPlayerStatus.Idle;
+  state.queue.push(...tracks);
+  if (startedEmpty) advance(state);
+  return { added: tracks.length, startedPlaying: startedEmpty };
+}
+
 export function skip(guildId) {
   const state = sessions.get(guildId);
   const skipped = state?.current?.track ?? null;
-  state?.player.stop(true); // Idle fires, which advances the queue
+  // Skipping past a looping track should not loop it back round again.
+  const loop = state?.loop;
+  if (state) state.loop = 'off';
+  state?.player.stop(true);
+  if (state) state.loop = loop;
   return skipped;
 }
 
@@ -135,8 +178,79 @@ export function stop(guildId) {
   if (!state) return 0;
   const dropped = state.queue.length;
   state.queue.length = 0;
+  state.loop = 'off';
   state.player.stop(true);
   return dropped;
+}
+
+export function pause(guildId) {
+  return sessions.get(guildId)?.player.pause() ?? false;
+}
+
+export function resume(guildId) {
+  return sessions.get(guildId)?.player.unpause() ?? false;
+}
+
+/**
+ * Re-opens the current track through a new filter chain. Seekable sources
+ * pick up where they were; piped ones start over.
+ */
+export function setSpeed(guildId, speed) {
+  const state = session(guildId);
+  state.speed = speed;
+  return restart(state);
+}
+
+export function setVolume(guildId, volume) {
+  const state = session(guildId);
+  state.volume = volume;
+  return restart(state);
+}
+
+function restart(state) {
+  const track = state.current?.track;
+  if (!track) return { restarted: false, resumedAt: 0 };
+
+  const at = track.seekable ? elapsed(state) : 0;
+  state.restarting = true;
+  state.current.kill?.();
+  state.player.stop(true);
+  try {
+    start(state, track, at);
+  } finally {
+    state.restarting = false;
+  }
+  return { restarted: true, resumedAt: at, fromStart: !track.seekable };
+}
+
+export function setLoop(guildId, mode) {
+  const state = session(guildId);
+  state.loop = mode;
+  return mode;
+}
+
+export function shuffle(guildId) {
+  const queue = sessions.get(guildId)?.queue;
+  if (!queue?.length) return 0;
+  for (let i = queue.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [queue[i], queue[j]] = [queue[j], queue[i]];
+  }
+  return queue.length;
+}
+
+export function clear(guildId) {
+  const state = sessions.get(guildId);
+  const dropped = state?.queue.length ?? 0;
+  if (state) state.queue.length = 0;
+  return dropped;
+}
+
+/** Removes one queued track by its 1-based position, as shown in the queue. */
+export function remove(guildId, position) {
+  const queue = sessions.get(guildId)?.queue;
+  if (!queue || position < 1 || position > queue.length) return null;
+  return queue.splice(position - 1, 1)[0];
 }
 
 export function leave(guildId) {
@@ -159,6 +273,16 @@ export function leave(guildId) {
 export const nowPlaying = (guildId) => sessions.get(guildId)?.current?.track ?? null;
 export const queued = (guildId) => [...(sessions.get(guildId)?.queue ?? [])];
 export const isConnected = (guildId) => Boolean(sessions.get(guildId)?.connection);
+export const settings = (guildId) => {
+  const state = sessions.get(guildId);
+  return {
+    speed: state?.speed ?? 1,
+    volume: state?.volume ?? 1,
+    loop: state?.loop ?? 'off',
+    paused: state?.player.state.status === AudioPlayerStatus.Paused,
+    position: state ? elapsed(state) : 0,
+  };
+};
 
-/** Test seam: swap the queue internals without a Discord connection. */
+/** Test seam: reach the queue internals without a Discord connection. */
 export const __sessions = sessions;

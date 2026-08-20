@@ -25,8 +25,8 @@ import { GREETING } from '../src/persona.js';
 import { looksLikeQuestion } from '../src/question.js';
 import { match as matchAnswer, fill } from '../src/faq.js';
 import { createConsole } from '../src/console.js';
-import { parse as parseMusic, trackFor } from '../src/music/commands.js';
-import { classify } from '../src/music/resolve.js';
+import { parse as parseMusic, trackFor, isDj } from '../src/music/commands.js';
+import { classify, tempoFilter } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
@@ -681,6 +681,62 @@ await check('a direct link becomes a playable track', async () => {
 });
 
 console.log('\nmusic: commands');
+await check('the whole command set parses', () => {
+  const expected = {
+    'veritysong x': 'song',
+    verityskip: 'skip',
+    veritystop: 'stop',
+    veritypause: 'pause',
+    verityresume: 'resume',
+    verityqueue: 'queue',
+    veritynp: 'np',
+    'verityloop queue': 'loop',
+    verityshuffle: 'shuffle',
+    verityclear: 'clear',
+    'verityremove 3': 'remove',
+    'verityspeed 2': 'speed',
+    'verityvolume 50': 'volume',
+    verityjoin: 'join',
+    verityleave: 'leave',
+  };
+  for (const [input, command] of Object.entries(expected)) {
+    assert.equal(parseMusic(input)?.command, command, `${input} should be ${command}`);
+  }
+});
+await check('speed is chained past what atempo allows alone', () => {
+  assert.deepEqual(tempoFilter(1), [], 'normal speed adds no filter at all');
+  assert.deepEqual(tempoFilter(2), ['atempo=2.000']);
+  assert.equal(tempoFilter(4).length, 2, '4x needs two passes');
+  assert.equal(tempoFilter(0.25).length, 2, 'and so does quarter speed');
+  // Every stage has to sit inside ffmpeg's 0.5-2.0 window.
+  for (const speed of [0.25, 0.5, 1.5, 2, 3, 4]) {
+    for (const stage of tempoFilter(speed)) {
+      const value = Number(stage.split('=')[1]);
+      assert.ok(value >= 0.5 && value <= 2, `${stage} is outside what atempo accepts`);
+    }
+  }
+});
+await check('dj list is open until someone is on it', () => {
+  const member = { id: 'u1', roles: { cache: { has: () => false } } };
+  assert.equal(isDj(member, 'guild-dj'), true, 'empty list means everyone');
+
+  store.addDj('guild-dj', { userId: 'u2' });
+  assert.equal(isDj(member, 'guild-dj'), false, 'now it restricts');
+  assert.equal(isDj({ id: 'u2', roles: { cache: { has: () => false } } }, 'guild-dj'), true);
+
+  store.addDj('guild-dj', { roleId: 'r1' });
+  assert.equal(
+    isDj({ id: 'u9', roles: { cache: { has: (id) => id === 'r1' } } }, 'guild-dj'),
+    true,
+  );
+
+  store.removeDj('guild-dj', { userId: 'u2' });
+  assert.equal(isDj({ id: 'u2', roles: { cache: { has: () => false } } }, 'guild-dj'), false);
+
+  assert.equal(store.clearDj('guild-dj'), 1, 'the role was still listed');
+  assert.equal(isDj(member, 'guild-dj'), true, 'cleared means everyone again');
+});
+
 await check('veritysong and friends parse', () => {
   assert.deepEqual(parseMusic('veritysong https://x.com/a.mp3'), {
     command: 'song',
@@ -757,6 +813,88 @@ await check('skip moves to the next one and kills the old process', async () => 
   await new Promise((resolve) => setTimeout(resolve, 150));
   assert.equal(musicPlayer.nowPlaying('guild-music')?.title, 'second song', 'advanced to the next');
   assert.ok(killed > before, 'the skipped source was killed, not left running');
+});
+await check('a playlist queues in one go', () => {
+  musicPlayer.__sessions.delete('guild-list');
+  const list = ['one', 'two', 'three'].map((name) => fakeTrack(name));
+  const { added, startedPlaying } = musicPlayer.enqueueAll('guild-list', list);
+  assert.equal(added, 3);
+  assert.equal(startedPlaying, true, 'the first one starts by itself');
+  assert.equal(musicPlayer.nowPlaying('guild-list').title, 'one');
+  assert.equal(musicPlayer.queued('guild-list').length, 2);
+
+  musicPlayer.enqueueAll('guild-list', [fakeTrack('four')]);
+  assert.deepEqual(
+    musicPlayer.queued('guild-list').map((track) => track.title),
+    ['two', 'three', 'four'],
+    'a second playlist goes behind the first',
+  );
+  musicPlayer.leave('guild-list');
+});
+await check('remove and shuffle work on the waiting queue', () => {
+  musicPlayer.__sessions.delete('guild-edit');
+  ['a', 'b', 'c', 'd'].forEach((name) => musicPlayer.enqueue('guild-edit', fakeTrack(name)));
+  // 'a' is playing; b, c, d are waiting.
+  assert.equal(musicPlayer.remove('guild-edit', 1).title, 'b', 'positions match the queue display');
+  assert.equal(musicPlayer.remove('guild-edit', 9), null, 'a bad position is refused');
+  assert.deepEqual(
+    musicPlayer.queued('guild-edit').map((track) => track.title),
+    ['c', 'd'],
+  );
+  assert.equal(musicPlayer.shuffle('guild-edit'), 2);
+  assert.equal(musicPlayer.clear('guild-edit'), 2);
+  assert.equal(
+    musicPlayer.nowPlaying('guild-edit').title,
+    'a',
+    'clearing leaves the current track',
+  );
+  musicPlayer.leave('guild-edit');
+});
+await check('looping a track puts it back in front when it ends', async () => {
+  musicPlayer.__sessions.delete('guild-loop');
+  musicPlayer.enqueue('guild-loop', fakeTrack('on repeat'));
+  musicPlayer.setLoop('guild-loop', 'track');
+
+  // Ending the track naturally is what the Idle handler reacts to.
+  musicPlayer.__sessions.get('guild-loop').player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(musicPlayer.nowPlaying('guild-loop')?.title, 'on repeat', 'it came back round');
+
+  musicPlayer.setLoop('guild-loop', 'off');
+  assert.equal(musicPlayer.skip('guild-loop').title, 'on repeat');
+  musicPlayer.leave('guild-loop');
+});
+await check('speed changes are remembered for the tracks that follow', () => {
+  musicPlayer.__sessions.delete('guild-speed');
+  const opened = [];
+  musicPlayer.enqueue('guild-speed', {
+    title: 'fast one',
+    requestedBy: 'dave',
+    seekable: true,
+    open: (options) => {
+      opened.push(options);
+      return { stream: Readable.from([tone]), kill: () => {} };
+    },
+  });
+  assert.equal(opened[0].speed, 1, 'starts at normal speed');
+
+  const result = musicPlayer.setSpeed('guild-speed', 2);
+  assert.equal(result.restarted, true, 'a seekable track is re-opened');
+  assert.equal(opened.at(-1).speed, 2, 'through the doubled filter');
+  assert.equal(musicPlayer.settings('guild-speed').speed, 2);
+  musicPlayer.leave('guild-speed');
+});
+await check('an unseekable track restarts rather than pretending to seek', () => {
+  musicPlayer.__sessions.delete('guild-pipe');
+  musicPlayer.enqueue('guild-pipe', {
+    title: 'from a pipe',
+    requestedBy: 'dave',
+    seekable: false,
+    open: () => ({ stream: Readable.from([tone]), kill: () => {} }),
+  });
+  const result = musicPlayer.setSpeed('guild-pipe', 2);
+  assert.equal(result.fromStart, true, 'and says so, rather than silently losing the position');
+  musicPlayer.leave('guild-pipe');
 });
 await check('stop empties the queue', () => {
   const dropped = musicPlayer.stop('guild-music');

@@ -37,7 +37,10 @@ const HELP = `
 
   join #voice-channel          get into a voice channel
   play <link or search>        play it there (veritysong works too)
-  skip · stop · queue · leave  the rest of the music controls
+  skip · stop · pause · resume  playback
+  queue · shuffle · clear       the queue
+  speed 2 · volume 50 · loop    2x speed, half volume, loop track|queue|off
+  leave                         get out of the voice channel
 
   faq                          list the canned answers
   faq add server ip, whats the ip = play.example.com
@@ -118,7 +121,10 @@ export function createConsole(client, out = (line = '') => console.log(line), on
     const command = rawCommand
       .replace(/^\//, '')
       // The Discord commands are muscle memory by now; accept them here too.
-      .replace(/^verity(?=(song|play|skip|next|stop|queue|q|np|nowplaying|join|leave|dc)$)/i, '')
+      .replace(
+        /^verity(?=(song|play|p|skip|s|next|stop|pause|resume|queue|q|np|nowplaying|loop|shuffle|clear|remove|speed|volume|vol|join|leave|dc)$)/i,
+        '',
+      )
       .toLowerCase();
     const args = rest.join(' ').replace(/^<(.+)>$/, '$1');
 
@@ -191,7 +197,58 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         );
       }
 
+      case 'pause':
+        return out(musicPlayer.pause(musicGuildId()) ? '  paused' : '  nothing playing');
+
+      case 'resume':
+        return out(musicPlayer.resume(musicGuildId()) ? '  playing' : '  nothing to resume');
+
+      case 'speed': {
+        const speed = Number(rest[0]);
+        if (!Number.isFinite(speed) || speed < 0.25 || speed > 4) {
+          return out('  speed <0.25-4>, e.g. speed 2');
+        }
+        const { restarted, fromStart } = musicPlayer.setSpeed(musicGuildId(), speed);
+        return out(`  ${speed}x${restarted && fromStart ? ' (restarted the track)' : ''}`);
+      }
+
+      case 'volume':
+      case 'vol': {
+        const percent = Number(rest[0]);
+        if (!Number.isFinite(percent) || percent < 0 || percent > 200) {
+          return out('  volume <0-200>, e.g. volume 50');
+        }
+        musicPlayer.setVolume(musicGuildId(), percent / 100);
+        return out(`  ${percent}%`);
+      }
+
+      case 'loop': {
+        const wanted = (rest[0] ?? '').toLowerCase();
+        const mode = ['track', 'song'].includes(wanted)
+          ? 'track'
+          : ['queue', 'all'].includes(wanted)
+            ? 'queue'
+            : ['off', 'none'].includes(wanted)
+              ? 'off'
+              : null;
+        if (!mode) return out('  loop track | loop queue | loop off');
+        musicPlayer.setLoop(musicGuildId(), mode);
+        return out(`  loop: ${mode}`);
+      }
+
+      case 'shuffle':
+        return out(`  shuffled ${musicPlayer.shuffle(musicGuildId())}`);
+
+      case 'clear':
+        return out(`  cleared ${musicPlayer.clear(musicGuildId())}`);
+
+      case 'remove': {
+        const removed = musicPlayer.remove(musicGuildId(), Number(rest[0]));
+        return out(removed ? `  removed ${removed.title}` : '  no track at that number');
+      }
+
       case 'skip':
+      case 's':
       case 'next': {
         const skipped = musicPlayer.skip(musicGuildId());
         return out(skipped ? `  skipped ${skipped.title}` : '  nothing playing');
