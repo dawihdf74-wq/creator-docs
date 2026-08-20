@@ -109,6 +109,8 @@ export const config = {
     // Seconds between unprompted replies in the same channel.
     cooldown: 8,
     replyInDms: true,
+    // Keep the music going once the queue runs out.
+    autoplay: false,
     // Only answer messages that are actually asking him something.
     questionsOnly: process.env.VERITY_QUESTIONS_ONLY === 'true',
     // Answered questions allowed per person per window. 0 disables the limit.

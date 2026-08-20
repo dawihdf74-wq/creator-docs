@@ -31,6 +31,7 @@ import {
   tracksFor,
   isDj,
   rebuildTrack,
+  playTrigger,
 } from '../src/music/commands.js';
 import {
   classify,
@@ -1198,6 +1199,49 @@ await check('removing every playlist says which ones went', () => {
   assert.deepEqual(names.sort(), ['friday', 'sunday'], 'so you know what you lost');
   assert.equal(store.listPlaylists('guild-wipe').length, 0);
   assert.deepEqual(store.clearPlaylists('guild-wipe'), [], 'and again is harmless');
+});
+
+await check('a phrase says what is missing rather than nothing at all', async () => {
+  // The complaint that started this: saying the phrase did nothing visible.
+  const reply = await playTrigger(
+    { phrase: 'dada put on that misery', url: 'https://x.com/a.mp3' },
+    { guildId: 'g', member: { voice: {} }, author: { username: 'dave' }, client: { user: {} } },
+  );
+  assert.equal(typeof reply, 'string', 'it answers');
+  assert.match(reply, /voice channel/i, 'and says what to do about it');
+});
+await check('autoplay is off until asked for', () => {
+  assert.equal(config.defaults.autoplay, false);
+});
+await check('what played is remembered, newest first', async () => {
+  musicPlayer.__sessions.delete('guild-history');
+  const events = [];
+  musicPlayer.enqueue('guild-history', fakeTrack('first'));
+  musicPlayer.__sessions.get('guild-history').onEvent = (event) => events.push(event);
+  musicPlayer.enqueue('guild-history', fakeTrack('second'));
+
+  musicPlayer.__sessions.get('guild-history').player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const heard = musicPlayer.history('guild-history').map((track) => track.title);
+  assert.deepEqual(heard, ['second', 'first'], 'most recent at the front');
+  assert.equal(musicPlayer.lastPlayed('guild-history').title, 'second');
+  musicPlayer.leave('guild-history');
+});
+await check('running dry reports what it ran dry after', async () => {
+  musicPlayer.__sessions.delete('guild-empty');
+  const events = [];
+  musicPlayer.enqueue('guild-empty', fakeTrack('only one'));
+  musicPlayer.__sessions.get('guild-empty').onEvent = (event) => events.push(event);
+
+  musicPlayer.__sessions.get('guild-empty').player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  const empty = events.find((event) => event.type === 'empty');
+  assert.ok(empty, 'the queue announces that it is empty');
+  assert.equal(empty.last?.title, 'only one', 'and what it just finished — autoplay needs that');
+  assert.ok(Array.isArray(empty.history), 'along with what has been heard already');
+  musicPlayer.leave('guild-empty');
 });
 
 console.log('\nmusic: the clickable panel');

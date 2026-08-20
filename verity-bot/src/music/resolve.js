@@ -431,4 +431,54 @@ export async function ytdlpDirectUrl(target, { search = false } = {}) {
   return url.trim();
 }
 
+/**
+ * Something to play after the queue runs dry.
+ *
+ * YouTube builds an endless mix for any video under the id RD<video id>, so
+ * this asks what the finished track *is*, then reads the first entries of its
+ * mix. No recommendation engine of our own — just the one already there.
+ */
+export async function ytdlpRelated(target, { search = false, limit = 15 } = {}) {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+
+  const { stdout: idOut } = await run(
+    config.ytdlp,
+    [
+      search ? `ytsearch1:${target}` : target,
+      '--print',
+      'id',
+      '--no-playlist',
+      '--quiet',
+      '--no-warnings',
+    ],
+    { timeout: 45_000 },
+  );
+
+  const id = idOut.trim().split('\n')[0];
+  if (!id) throw new Error('could not tell what that was');
+
+  const { stdout } = await run(
+    config.ytdlp,
+    [
+      `https://www.youtube.com/watch?v=${id}&list=RD${id}`,
+      '--flat-playlist',
+      '--playlist-end',
+      String(limit),
+      '--print',
+      '%(title)s\t%(url)s',
+      '--quiet',
+      '--no-warnings',
+    ],
+    { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 },
+  );
+
+  return stdout
+    .split('\n')
+    .map((line) => line.split('\t'))
+    .filter(([title, url]) => title && url)
+    .map(([title, url]) => ({ title: title.trim(), url: url.trim() }));
+}
+
 export const ytdlpEnabled = () => Boolean(config.ytdlp);

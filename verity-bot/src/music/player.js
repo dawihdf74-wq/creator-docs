@@ -74,6 +74,8 @@ function session(guildId) {
     bitrate: 64_000,
     loop: 'off', // off | track | queue
     restarting: false,
+    lastPlayed: null,
+    history: [],
     idleTimer: null,
     onEvent: () => {},
   };
@@ -116,6 +118,9 @@ function start(state, track, seek = 0) {
   });
   const resource = createAudioResource(stream, { inputType: StreamType.OggOpus });
   state.current = { track, kill };
+  state.lastPlayed = track;
+  // Kept so autoplay does not immediately suggest what just finished.
+  state.history = [track, ...state.history.filter((old) => old.id !== track.id)].slice(0, 30);
   state.resource = resource;
   state.seekBase = seek;
   state.player.play(resource);
@@ -126,7 +131,7 @@ function advance(state) {
 
   const next = state.queue.shift();
   if (!next) {
-    state.onEvent({ type: 'empty' });
+    state.onEvent({ type: 'empty', last: state.lastPlayed, history: state.history });
     state.idleTimer = setTimeout(() => leave(state.guildId), IDLE_MS);
     state.idleTimer.unref?.();
     return;
@@ -376,6 +381,8 @@ export function leave(guildId) {
 }
 
 export const nowPlaying = (guildId) => sessions.get(guildId)?.current?.track ?? null;
+export const lastPlayed = (guildId) => sessions.get(guildId)?.lastPlayed ?? null;
+export const history = (guildId) => [...(sessions.get(guildId)?.history ?? [])];
 export const queued = (guildId) => [...(sessions.get(guildId)?.queue ?? [])];
 export const isConnected = (guildId) => Boolean(sessions.get(guildId)?.connection);
 export const settings = (guildId) => {

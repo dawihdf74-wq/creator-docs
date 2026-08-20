@@ -192,6 +192,37 @@ client.on(Events.MessageCreate, async (message) => {
     return;
   }
 
+  // Phrases that put a song on. Like the commands above, these work wherever
+  // he can see - being asked for a song is not a conversation, so it does not
+  // wait on the channel being one of his.
+  const trigger = message.guildId
+    ? matchAnswer(
+        store
+          .listTriggers(message.guildId)
+          .map((entry) => ({ ...entry, triggers: [entry.phrase] })),
+        message.content,
+      )
+    : null;
+
+  if (trigger && shouldSay(message.channelId, `trigger:${trigger.phrase}`, 30_000)) {
+    try {
+      const reply = await playTrigger(trigger, message);
+      if (reply) {
+        await message.reply(
+          typeof reply === 'string'
+            ? { content: reply, allowedMentions: { repliedUser: false } }
+            : { ...reply, allowedMentions: { repliedUser: false } },
+        );
+      }
+    } catch (error) {
+      console.error('[verity] trigger:', error);
+      await message
+        .reply({ content: error.message, allowedMentions: { repliedUser: false } })
+        .catch(() => {});
+    }
+    return;
+  }
+
   const isDm = !message.guildId;
   const settings = isDm ? config.defaults : store.getSettings(message.guildId);
 
@@ -225,27 +256,6 @@ client.on(Events.MessageCreate, async (message) => {
   if (settings.questionsOnly && !looksLikeQuestion(message.content)) return;
 
   if (!addressed && !shouldButtIn(mode, settings, session)) return;
-  // Phrases that put a song on. Checked before the canned answers, since a
-  // phrase is a deliberate thing someone set up.
-  const trigger = message.guildId
-    ? matchAnswer(
-        store
-          .listTriggers(message.guildId)
-          .map((entry) => ({ ...entry, triggers: [entry.phrase] })),
-        message.content,
-      )
-    : null;
-
-  if (trigger && shouldSay(message.channelId, `trigger:${trigger.phrase}`, 30_000)) {
-    try {
-      const reply = await playTrigger(trigger, message);
-      if (reply) await message.reply({ ...reply, allowedMentions: { repliedUser: false } });
-    } catch (error) {
-      console.error('[verity] trigger:', error.message);
-    }
-    return;
-  }
-
   // A canned answer costs nothing and arrives instantly, so it is checked
   // before the throttle, the quota and the model.
   const canned = matchAnswer(store.listAnswers(message.guildId ?? 'dm'), message.content);

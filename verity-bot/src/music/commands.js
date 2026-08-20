@@ -12,6 +12,7 @@ import {
   ytdlpDirectUrl,
   ytdlpEnabled,
   ytdlpList,
+  ytdlpRelated,
 } from './resolve.js';
 import * as player from './player.js';
 import { buildPlaylistView } from './view.js';
@@ -55,6 +56,8 @@ const ALIASES = {
   trigger: 'trigger',
   triggers: 'trigger',
   tr: 'trigger',
+  autoplay: 'autoplay',
+  ap: 'autoplay',
   // choosing what is next
   next: 'next',
   playnext: 'next',
@@ -317,6 +320,8 @@ const HELP = [
   '**verityshuffle** `veritysh` · **verityclear** `verityc` · **verityremove** <n> `verityr`',
   '**verityloop** off | track | queue — once each, one forever, or round and round. Short: `verityl`',
   '**verityspeed** 2 `veritysd` · **verityvolume** 50 `verityv`',
+  '**verityautoplay** on — when the queue runs out he finds something himself. Short: `verityap`',
+  '**veritytrigger** add <phrase> = <link> — say the phrase, the song goes on',
   '**verityjoin** · **verityleave** `verityd`',
 ].join('\n');
 
@@ -496,6 +501,29 @@ export async function handle({ command, argument }, message) {
           ),
         ],
       };
+    }
+
+    case 'autoplay': {
+      const wanted = argument.trim().toLowerCase();
+      const settings = store.getSettings(guildId);
+
+      if (!wanted) {
+        return settings.autoplay
+          ? 'autoplay is on. i will keep going when you run out. i always do. :)'
+          : 'autoplay is off. `verityautoplay on` and the music never stops.';
+      }
+      if (!['on', 'off', 'true', 'false'].includes(wanted)) {
+        return '`verityautoplay on` or `verityautoplay off`.';
+      }
+      if (!ytdlpEnabled() && ['on', 'true'].includes(wanted)) {
+        return 'i have nothing to find music with. VERITY_YTDLP has to be set for that. :|';
+      }
+
+      const on = ['on', 'true'].includes(wanted);
+      store.updateSettings(guildId, { autoplay: on });
+      return on
+        ? 'autoplay on. when your queue runs out i will find something. you will never have to leave. :D'
+        : 'autoplay off. when it runs out, it runs out.';
     }
 
     case 'wipe': {
@@ -712,6 +740,44 @@ export async function handle({ command, argument }, message) {
 }
 
 /**
+ * The queue ran dry and autoplay is on: find something like the last track.
+ *
+ * The taste is YouTube's, not ours — every track it knows has an endless mix
+ * behind it, and this reads the front of that, skipping anything played
+ * recently so the evening does not turn into a loop of four songs.
+ */
+async function maybeAutoplay(message, event) {
+  const guildId = message.guildId;
+  if (!store.getSettings(guildId).autoplay || !ytdlpEnabled()) return;
+  if (!player.isConnected(guildId)) return; // he has already left
+  if (!event.last?.meta) return;
+
+  const heard = new Set((event.history ?? []).map((track) => track.title.toLowerCase()));
+
+  try {
+    const related = await ytdlpRelated(event.last.meta.target, {
+      search: Boolean(event.last.meta.search),
+    });
+    const choice = related.find((entry) => !heard.has(entry.title.toLowerCase()));
+    if (!choice) return;
+
+    const track = resolvedTrack({ title: choice.title, requestedBy: 'Verity', target: choice.url });
+    player.enqueue(guildId, track);
+    await message.channel
+      .send({
+        embeds: [
+          embeds
+            .queued(choice.title, 1, 'you ran out, so i chose. you are welcome. :)')
+            .setAuthor({ name: 'Autoplay' }),
+        ],
+      })
+      .catch(() => {});
+  } catch (error) {
+    console.error('[verity] autoplay:', error.message);
+  }
+}
+
+/**
  * A phrase someone set up put a song on.
  *
  * Deliberately outside the DJ check: a phrase only exists because someone who
@@ -719,10 +785,13 @@ export async function handle({ command, argument }, message) {
  */
 export async function playTrigger(trigger, message) {
   const voiceChannel = message.member?.voice?.channel;
-  if (!voiceChannel) return null; // no room to play into, so let it pass
+  // Saying so is better than doing nothing: silence looks like a broken bot.
+  if (!voiceChannel) return 'i heard you. get in a voice channel and say it again. :|';
 
   const permissions = voiceChannel.permissionsFor(message.client.user);
-  if (!permissions?.has('Connect') || !permissions?.has('Speak')) return null;
+  if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
+    return `i heard you, but i cannot speak in ${voiceChannel.name}.`;
+  }
 
   const { tracks, label } = await tracksFor(
     trigger.url,
@@ -757,6 +826,9 @@ function events(message) {
           ],
         })
         .catch(() => {});
+    }
+    if (event.type === 'empty') {
+      maybeAutoplay(message, event).catch(() => {});
     }
     if (event.type === 'error') {
       message.channel
