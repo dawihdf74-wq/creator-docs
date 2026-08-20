@@ -38,7 +38,9 @@ const HELP = `
   join #voice-channel          get into a voice channel
   play <link or search>        play it there (veritysong works too)
   skip · stop · pause · resume  playback
-  queue · shuffle · clear       the queue
+  playlist · queue             what is lined up
+  next 3 [speed] · jump 3      move one up · go straight to it
+  shuffle · clear · remove 3   the rest of the queue
   speed 2 · volume 50 · loop    2x speed, half volume, loop track|queue|off
   leave                         get out of the voice channel
 
@@ -122,7 +124,7 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       .replace(/^\//, '')
       // The Discord commands are muscle memory by now; accept them here too.
       .replace(
-        /^verity(?=(song|play|p|skip|s|next|stop|pause|resume|queue|q|np|nowplaying|loop|shuffle|clear|remove|speed|volume|vol|join|leave|dc)$)/i,
+        /^verity(?=(song|play|p|playlist|list|pl|next|jump|skip|s|stop|pause|resume|queue|q|np|nowplaying|loop|shuffle|clear|remove|speed|volume|vol|join|leave|dc)$)/i,
         '',
       )
       .toLowerCase();
@@ -247,6 +249,21 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         return out(removed ? `  removed ${removed.title}` : '  no track at that number');
       }
 
+      case 'next': {
+        const speed = rest[1] ? Number(rest[1]) : null;
+        const moved = musicPlayer.moveToFront(musicGuildId(), Number(rest[0]), speed);
+        return out(
+          moved
+            ? `  ${moved.title} is next${speed ? ` at ${speed}x` : ''}`
+            : '  no track at that number',
+        );
+      }
+
+      case 'jump': {
+        const jumped = musicPlayer.jumpTo(musicGuildId(), Number(rest[0]));
+        return out(jumped ? `  jumped to ${jumped.track.title}` : '  no track at that number');
+      }
+
       case 'skip':
       case 's':
       case 'next': {
@@ -259,6 +276,9 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         return out(`  stopped${dropped ? `, dropped ${dropped} queued` : ''}`);
       }
 
+      case 'playlist':
+      case 'list':
+      case 'pl':
       case 'queue':
       case 'q':
       case 'np':

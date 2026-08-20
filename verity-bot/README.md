@@ -185,6 +185,12 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityskip` · `veritystop` | Skip one · stop and clear the queue |
 | `veritypause` · `verityresume` | Hold it · carry on |
 | `verityqueue` · `veritynp` | What's waiting · what's on, and how far in |
+| `verityplaylist` | Everything lined up, numbered. `verityplaylist 2` for the next page |
+| `veritynext <n> [speed]` | That one plays next — at that speed, if you name one |
+| `verityjump <n>` | Go straight to it, binning everything in between |
+| `veritysaveplaylist <name>` | Keep this queue for later |
+| `verityplaylist <name>` | Put a saved one back. `verityplaylist saved` lists them |
+| `veritydeleteplaylist <name>` | Forget one |
 | `verityshuffle` · `verityclear` · `verityremove <n>` | Reorder the queue |
 | `verityloop track\|queue\|off` | Repeat one, repeat everything, or stop |
 | `verityspeed 2` | Double speed. Anything from 0.25 to 4 |
@@ -193,6 +199,24 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 
 Short forms work where they're obvious: `verityp`, `veritys`, `verityq`, `verityvol`,
 `veritydc`.
+
+**Picking what plays next.** `verityplaylist` numbers everything waiting, and those
+numbers are what the other commands take:
+
+```
+verityplaylist        → ▶ playing now, then 1, 2, 3…
+veritynext 4          → number 4 jumps the queue
+veritynext 4 2        → …and plays at double speed, just that one
+verityjump 4          → skip straight to it, dropping 1–3
+```
+
+A speed set that way belongs to the track, not the session: the rest of the queue plays
+normally, and `veritynp` shows the `2x` badge while it's on.
+
+**Saving a queue.** `veritysaveplaylist friday` keeps whatever is lined up, including any
+per-track speeds. `verityplaylist friday` puts it back, `verityplaylist saved` lists what
+you've kept, `veritydeleteplaylist friday` forgets it. What's stored is the title and where
+each track came from — enough to rebuild it — so saved playlists survive restarts.
 
 **Playlists.** A YouTube link carrying `list=` queues the whole playlist, needing nothing
 but yt-dlp. A Spotify playlist or album link queues every track on it too, by either route:

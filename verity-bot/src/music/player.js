@@ -95,7 +95,8 @@ function session(guildId) {
 
 function start(state, track, seek = 0) {
   const { stream, kill } = track.open({
-    speed: state.speed,
+    // A track can carry its own speed, set when someone lined it up.
+    speed: track.speed ?? state.speed,
     volume: state.volume,
     bitrate: state.bitrate,
     seek,
@@ -146,7 +147,8 @@ function prefetch(state) {
 /** How far into the source we are, in seconds, allowing for playback speed. */
 function elapsed(state) {
   const played = (state.resource?.playbackDuration ?? 0) / 1000;
-  return state.seekBase + played * state.speed;
+  const rate = state.current?.track?.speed ?? state.speed;
+  return state.seekBase + played * rate;
 }
 
 /** Connects to a voice channel, reusing the connection if he is already there. */
@@ -288,6 +290,44 @@ export function clear(guildId) {
 }
 
 /** Removes one queued track by its 1-based position, as shown in the queue. */
+/**
+ * Moves a queued track to the front, so it plays next, optionally at a speed
+ * of its own. Returns the track, or null if there is nothing at that number.
+ */
+export function moveToFront(guildId, position, speed = null) {
+  const queue = sessions.get(guildId)?.queue;
+  if (!queue || position < 1 || position > queue.length) return null;
+
+  const [track] = queue.splice(position - 1, 1);
+  if (speed) track.speed = speed;
+  queue.unshift(track);
+  return track;
+}
+
+/** Skips straight to a queued track, dropping everything in front of it. */
+export function jumpTo(guildId, position) {
+  const state = sessions.get(guildId);
+  const queue = state?.queue;
+  if (!queue || position < 1 || position > queue.length) return null;
+
+  const skipped = queue.splice(0, position - 1).length;
+  const track = queue[0];
+  const loop = state.loop;
+  state.loop = 'off'; // do not loop the track we are jumping away from
+  state.player.stop(true);
+  state.loop = loop;
+  return { track, skipped };
+}
+
+/** Sets (or clears) the speed for one queued track. */
+export function setTrackSpeed(guildId, position, speed) {
+  const queue = sessions.get(guildId)?.queue;
+  if (!queue || position < 1 || position > queue.length) return null;
+  const track = queue[position - 1];
+  track.speed = speed || null;
+  return track;
+}
+
 export function remove(guildId, position) {
   const queue = sessions.get(guildId)?.queue;
   if (!queue || position < 1 || position > queue.length) return null;

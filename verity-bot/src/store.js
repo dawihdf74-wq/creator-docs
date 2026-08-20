@@ -53,6 +53,7 @@ export function getGuild(guildId) {
       protected: [],
       faq: [],
       dj: { users: [], roles: [] },
+      playlists: {},
     };
     save();
   }
@@ -63,6 +64,7 @@ export function getGuild(guildId) {
   guild.dj ??= { users: [], roles: [] };
   guild.dj.users ??= [];
   guild.dj.roles ??= [];
+  guild.playlists ??= {};
   guild.channels ??= {};
   return guild;
 }
@@ -170,6 +172,34 @@ export function clearDj(guildId) {
   dj.roles = [];
   save();
   return had;
+}
+
+/**
+ * Saved playlists. Only what is needed to rebuild a track is kept — its title
+ * and where it came from — because a queued track is a live thing with child
+ * processes attached and none of that survives being written to disk.
+ */
+export function savePlaylist(guildId, name, entries, by) {
+  getGuild(guildId).playlists[name.toLowerCase()] = {
+    name,
+    entries,
+    by,
+    saved: Date.now(),
+  };
+  save();
+  return entries.length;
+}
+
+export const getPlaylist = (guildId, name) => getGuild(guildId).playlists[String(name).toLowerCase()] ?? null;
+export const listPlaylists = (guildId) => Object.values(getGuild(guildId).playlists);
+
+export function deletePlaylist(guildId, name) {
+  const playlists = getGuild(guildId).playlists;
+  const key = String(name).toLowerCase();
+  const existed = Boolean(playlists[key]);
+  delete playlists[key];
+  save();
+  return existed;
 }
 
 /** Flush pending writes on shutdown. */

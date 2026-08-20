@@ -25,7 +25,13 @@ import { GREETING } from '../src/persona.js';
 import { looksLikeQuestion } from '../src/question.js';
 import { match as matchAnswer, fill } from '../src/faq.js';
 import { createConsole } from '../src/console.js';
-import { parse as parseMusic, trackFor, isDj } from '../src/music/commands.js';
+import {
+  parse as parseMusic,
+  trackFor,
+  tracksFor,
+  isDj,
+  rebuildTrack,
+} from '../src/music/commands.js';
 import { classify, tempoFilter, parseEmbedTracks } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { resolveBitrate } from '../src/music/player.js';
@@ -992,6 +998,92 @@ await check('an unseekable track restarts rather than pretending to seek', () =>
   assert.equal(result.fromStart, true, 'and says so, rather than silently losing the position');
   musicPlayer.leave('guild-pipe');
 });
+await check('a track can be lined up next, at its own speed', () => {
+  musicPlayer.__sessions.delete('guild-order');
+  ['a', 'b', 'c', 'd'].forEach((name) => musicPlayer.enqueue('guild-order', fakeTrack(name)));
+  // 'a' plays; b, c, d wait.
+  const moved = musicPlayer.moveToFront('guild-order', 3, 2);
+  assert.equal(moved.title, 'd', 'numbering matches what verityplaylist shows');
+  assert.equal(moved.speed, 2, 'and it carries its own speed');
+  assert.deepEqual(
+    musicPlayer.queued('guild-order').map((track) => track.title),
+    ['d', 'b', 'c'],
+  );
+  assert.equal(musicPlayer.moveToFront('guild-order', 99), null, 'a bad number is refused');
+  musicPlayer.leave('guild-order');
+});
+await check('a per-track speed is used instead of the session speed', () => {
+  musicPlayer.__sessions.delete('guild-tspeed');
+  const opened = [];
+  const spy = (title, speed) => ({
+    title,
+    requestedBy: 'dave',
+    seekable: true,
+    ...(speed ? { speed } : {}),
+    open: (options) => {
+      opened.push({ title, speed: options.speed });
+      return { stream: Readable.from([tone]), kill: () => {} };
+    },
+  });
+  musicPlayer.enqueue('guild-tspeed', spy('normal'));
+  musicPlayer.setSpeed('guild-tspeed', 1.5); // session speed
+  musicPlayer.enqueue('guild-tspeed', spy('its own', 3));
+  musicPlayer.skip('guild-tspeed');
+
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const last = opened.at(-1);
+      assert.equal(last.title, 'its own');
+      assert.equal(last.speed, 3, 'the track speed wins over the session speed');
+      musicPlayer.leave('guild-tspeed');
+      resolve();
+    }, 150);
+  });
+});
+await check('jumping drops everything in between', async () => {
+  musicPlayer.__sessions.delete('guild-jump');
+  ['a', 'b', 'c', 'd'].forEach((name) => musicPlayer.enqueue('guild-jump', fakeTrack(name)));
+  const jumped = musicPlayer.jumpTo('guild-jump', 3);
+  assert.equal(jumped.track.title, 'd');
+  assert.equal(jumped.skipped, 2, 'b and c thrown out on the way');
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.equal(musicPlayer.nowPlaying('guild-jump')?.title, 'd');
+  musicPlayer.leave('guild-jump');
+});
+await check('a queue can be saved and put back later', () => {
+  const entries = [
+    {
+      title: 'Band - One',
+      meta: { kind: 'resolved', target: 'Band One', search: true },
+      speed: null,
+    },
+    { title: 'a-file', meta: { kind: 'direct', target: 'https://x.com/a.mp3' }, speed: 2 },
+  ];
+  assert.equal(store.savePlaylist('guild-save', 'friday', entries, 'dave'), 2);
+
+  const saved = store.getPlaylist('guild-save', 'FRIDAY');
+  assert.ok(saved, 'the name is not case sensitive');
+  assert.equal(saved.entries.length, 2);
+  assert.equal(store.listPlaylists('guild-save').length, 1);
+
+  const rebuilt = saved.entries.map((entry) => rebuildTrack(entry, 'dave'));
+  assert.equal(rebuilt[0].title, 'Band - One');
+  assert.equal(rebuilt[0].seekable, false, 'a looked-up track still has to be looked up');
+  assert.equal(rebuilt[1].seekable, true, 'a direct file is seekable straight away');
+  assert.equal(rebuilt[1].speed, 2, 'and its saved speed comes back with it');
+  assert.equal(typeof rebuilt[0].open, 'function', 'and both are playable again');
+
+  assert.equal(store.deletePlaylist('guild-save', 'friday'), true);
+  assert.equal(store.deletePlaylist('guild-save', 'friday'), false);
+});
+await check('a queued track carries what it needs to be saved', async () => {
+  const { tracks } = await tracksFor('https://example.com/Some%20Song.mp3', 'dave');
+  assert.deepEqual(tracks[0].meta, {
+    kind: 'direct',
+    target: 'https://example.com/Some%20Song.mp3',
+  });
+});
+
 await check('stop empties the queue', () => {
   const dropped = musicPlayer.stop('guild-music');
   assert.equal(dropped, 1, 'third song was still waiting');

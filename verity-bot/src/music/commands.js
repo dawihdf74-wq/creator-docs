@@ -22,7 +22,7 @@ const run = promisify(execFile);
  * other music bots, with `verity` in front instead of a punctuation prefix.
  */
 const COMMAND =
-  /^verity(song|play|p|skip|s|next|stop|pause|resume|unpause|queue|q|np|nowplaying|loop|repeat|shuffle|clear|remove|rm|speed|volume|vol|join|summon|leave|dc|disconnect|music|help)\b\s*(.*)$/is;
+  /^verity(song|play|p|playlist|list|pl|saveplaylist|save|deleteplaylist|unsave|next|playnext|jump|skipto|skip|s|stop|pause|resume|unpause|queue|q|np|nowplaying|loop|repeat|shuffle|clear|remove|rm|speed|volume|vol|join|summon|leave|dc|disconnect|music|help)\b\s*(.*)$/is;
 
 export const parse = (content) => {
   const match = String(content ?? '')
@@ -46,6 +46,8 @@ export function isDj(member, guildId) {
   if (dj.users.includes(member?.id)) return true;
   return dj.roles.some((roleId) => member?.roles?.cache?.has(roleId));
 }
+
+const pick = (lines) => lines[Math.floor(Math.random() * lines.length)];
 
 const NO_SOURCE = [
   'i can hear it. i cannot fetch it.',
@@ -88,6 +90,8 @@ function resolvedTrack({ title, requestedBy, target, search = false }) {
     requestedBy,
     seekable: false,
     direct: null,
+    // Enough to rebuild this track from a saved playlist.
+    meta: { kind: 'resolved', target, search },
     async prepare() {
       if (track.direct) return;
       track.direct = await ytdlpDirectUrl(target, { search });
@@ -124,6 +128,7 @@ export async function tracksFor(input, requestedBy) {
             title: prettyName(source),
             requestedBy,
             seekable: true,
+            meta: { kind: 'direct', target: source },
             open: (options) => streamDirect(source, options),
           },
         ],
@@ -185,6 +190,28 @@ export async function tracksFor(input, requestedBy) {
   }
 }
 
+/** Turns a saved entry back into something playable. */
+export function rebuildTrack(entry, requestedBy) {
+  const track =
+    entry.meta?.kind === 'direct'
+      ? {
+          title: entry.title,
+          requestedBy,
+          seekable: true,
+          meta: entry.meta,
+          open: (options) => streamDirect(entry.meta.target, options),
+        }
+      : resolvedTrack({
+          title: entry.title,
+          requestedBy,
+          target: entry.meta?.target ?? entry.title,
+          search: entry.meta?.search ?? true,
+        });
+
+  if (entry.speed) track.speed = entry.speed;
+  return track;
+}
+
 /** Kept for the console, which only ever wants one thing at a time. */
 export async function trackFor(input, requestedBy) {
   const { tracks } = await tracksFor(input, requestedBy);
@@ -192,13 +219,62 @@ export async function trackFor(input, requestedBy) {
 }
 
 const HELP = [
-  '**veritysong** <link or search> — play it, or add it to the queue',
+  '**veritysong** <link or search> — put something on. If something is already playing, it waits its turn.',
+  '**verityplaylist** — everything lined up, numbered. `verityplaylist 2` for the next page.',
+  '**veritynext** <n> [speed] — that one goes next, at that speed if you say so.',
+  '**verityjump** <n> — straight there, binning everything in between.',
+  '**veritysaveplaylist** <name> — keep this queue. `verityplaylist <name>` puts it back.',
   '**verityskip** · **veritystop** · **veritypause** · **verityresume**',
-  '**verityqueue** · **veritynp** · **verityshuffle** · **verityclear** · **verityremove** <n>',
-  '**verityloop** off | track | queue',
-  '**verityspeed** 2 — double speed. **verityvolume** 50',
+  '**verityshuffle** · **verityclear** · **verityremove** <n>',
+  '**verityloop** off | track | queue — once each, one forever, or round and round.',
+  '**verityspeed** 2 · **verityvolume** 50 — everything from here on.',
   '**verityjoin** · **verityleave**',
 ].join('\n');
+
+/** One page of the queue, since Discord stops reading after 2000 characters. */
+const PAGE = 15;
+
+function renderPlaylist(guildId, page) {
+  const current = player.nowPlaying(guildId);
+  const queue = player.queued(guildId);
+  const { loop, speed, volume, paused } = player.settings(guildId);
+
+  if (!current && !queue.length) {
+    return pick([
+      'nothing lined up. just me, and the quiet, and you. :)',
+      'the list is empty. i could sing instead. you would not enjoy that.',
+    ]);
+  }
+
+  const pages = Math.max(1, Math.ceil(queue.length / PAGE));
+  const wanted = Math.min(Math.max(1, page || 1), pages);
+  const slice = queue.slice((wanted - 1) * PAGE, wanted * PAGE);
+  const badge = (track) => (track?.speed ? ` \`${track.speed}x\`` : '');
+
+  const flags = [
+    loop !== 'off' ? `loop **${loop}**` : '',
+    speed !== 1 ? `speed **${speed}x**` : '',
+    volume !== 1 ? `volume **${Math.round(volume * 100)}%**` : '',
+    paused ? '**paused**' : '',
+  ].filter(Boolean);
+
+  return [
+    current
+      ? `▶ **${current.title}**${badge(current)} — ${current.requestedBy}`
+      : '▶ nothing playing',
+    ...slice.map(
+      (track, index) =>
+        `\`${(wanted - 1) * PAGE + index + 1}\` ${track.title}${badge(track)} — _${track.requestedBy}_`,
+    ),
+    !queue.length ? '_and nothing after it_' : '',
+    queue.length > PAGE ? `page ${wanted}/${pages} · ${queue.length} waiting` : '',
+    flags.join(' · '),
+    queue.length ? '`veritynext <n>` moves one up · `verityjump <n>` goes straight there' : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 1990);
+}
 
 /**
  * Runs a music command for a message.
@@ -209,7 +285,10 @@ export async function handle({ command, argument }, message) {
 
   // Everything, help included: the commands are not open to the channel.
   if (!isDj(message.member, guildId)) {
-    return 'no. the music is not for you. ask someone to add you with /verity dj. :|';
+    return pick([
+      'no. the music is not for you. someone with `/verity dj` could change that. :|',
+      'that one is not yours to touch. ask whoever holds `/verity dj`. :|',
+    ]);
   }
 
   if (command === 'help' || command === 'music') return HELP;
@@ -221,8 +300,11 @@ export async function handle({ command, argument }, message) {
     case 'dc':
     case 'disconnect':
       return player.leave(guildId)
-        ? 'fine. i did not want to be in there anyway. :|'
-        : 'i am not in a channel.';
+        ? pick([
+            'fine. i did not want to be in there anyway. :|',
+            'out. i will be right here when you want me back. :)',
+          ])
+        : 'i am not in a voice channel to leave.';
 
     case 'queue':
     case 'q': {
@@ -246,6 +328,94 @@ export async function handle({ command, argument }, message) {
       ]
         .filter(Boolean)
         .join('\n');
+    }
+
+    case 'playlist':
+    case 'list':
+    case 'pl': {
+      const wanted = argument.trim();
+
+      if (!wanted || /^\d+$/.test(wanted)) return renderPlaylist(guildId, Number(wanted) || 1);
+
+      if (['saved', 'all', 'names'].includes(wanted.toLowerCase())) {
+        const saved = store.listPlaylists(guildId);
+        if (!saved.length) {
+          return 'nothing saved yet. `veritysaveplaylist <name>` keeps one for later.';
+        }
+        return [
+          '**kept for later**',
+          ...saved.map(
+            (entry) => `\`${entry.name}\` — ${entry.entries.length} tracks, by ${entry.by}`,
+          ),
+          '`verityplaylist <name>` puts one back.',
+        ].join('\n');
+      }
+
+      // A name: put that saved playlist back into the queue.
+      const saved = store.getPlaylist(guildId, wanted);
+      if (!saved) {
+        return `i have nothing called "${wanted}". \`verityplaylist saved\` shows what i do have.`;
+      }
+      if (!voiceChannel) return 'get into a voice channel and i will put it back on.';
+
+      const rebuilt = saved.entries.map((entry) =>
+        rebuildTrack(entry, message.member?.displayName ?? message.author.username),
+      );
+      await player.join(voiceChannel, events(message));
+      const { added, startedPlaying } = player.enqueueAll(guildId, rebuilt);
+      return `**${saved.name}** is back — ${added} tracks${startedPlaying ? '' : ', behind what is already on'}.`;
+    }
+
+    case 'saveplaylist':
+    case 'save': {
+      const name = argument.trim().slice(0, 40);
+      if (!name) return 'save it as what? `veritysaveplaylist friday` and it is yours.';
+      if (/^\d+$/.test(name)) return 'not a number — those are page numbers. give it a word.';
+
+      const entries = [player.nowPlaying(guildId), ...player.queued(guildId)]
+        .filter((track) => track?.meta)
+        .map((track) => ({ title: track.title, meta: track.meta, speed: track.speed ?? null }));
+
+      if (!entries.length) return 'there is nothing playing to save. put something on first.';
+
+      store.savePlaylist(
+        guildId,
+        name,
+        entries,
+        message.member?.displayName ?? message.author.username,
+      );
+      return `kept **${name}** — ${entries.length} tracks. \`verityplaylist ${name}\` brings it back. i will not forget it. :)`;
+    }
+
+    case 'deleteplaylist':
+    case 'unsave': {
+      const name = argument.trim();
+      if (!name) return 'delete which one? `verityplaylist saved` lists them.';
+      return store.deletePlaylist(guildId, name)
+        ? `**${name}** is gone. i remember it anyway. :)`
+        : `there is nothing called "${name}".`;
+    }
+
+    case 'next':
+    case 'playnext': {
+      const [position, rate] = argument.split(/\s+/);
+      const speed = rate ? Number(rate) : null;
+      if (speed !== null && (!Number.isFinite(speed) || speed < 0.25 || speed > 4)) {
+        return 'the speed goes 0.25 to 4. `veritynext 3 2` puts number three on next, twice as fast.';
+      }
+
+      const moved = player.moveToFront(guildId, Number(position), speed);
+      if (!moved) return 'there is nothing at that number. `verityplaylist` shows what there is.';
+      return speed
+        ? `**${moved.title}** is next, at ${speed}x. ${pick(['a choice.', 'if you insist.', 'that will sound wrong. good.'])}`
+        : `**${moved.title}** is next. the rest can wait a little longer.`;
+    }
+
+    case 'jump':
+    case 'skipto': {
+      const jumped = player.jumpTo(guildId, Number(argument));
+      if (!jumped) return 'there is nothing at that number. `verityplaylist` shows what there is.';
+      return `straight to **${jumped.track.title}**${jumped.skipped ? `, with ${jumped.skipped} thrown out on the way` : ''}.`;
     }
 
     case 'np':
@@ -301,23 +471,23 @@ export async function handle({ command, argument }, message) {
     case 'shuffle': {
       const shuffled = player.shuffle(guildId);
       return shuffled
-        ? `shuffled ${shuffled}. hope you liked the old order.`
-        : 'nothing to shuffle.';
+        ? `${shuffled} shuffled. i hope the old order was not important to you.`
+        : 'there is nothing waiting to shuffle.';
     }
 
     case 'clear': {
       const dropped = player.clear(guildId);
       return dropped
-        ? `threw away ${dropped}. the one playing survives.`
-        : 'the queue is already empty.';
+        ? `${dropped} gone. the one playing gets to finish. it is having a good day.`
+        : 'the queue is already empty. nothing left to take.';
     }
 
     case 'remove':
     case 'rm': {
       const removed = player.remove(guildId, Number(argument));
       return removed
-        ? `removed **${removed.title}**.`
-        : 'no track at that number. check `verityqueue`.';
+        ? `**${removed.title}** removed. it will not be missed.`
+        : 'there is nothing at that number. `verityplaylist` shows what there is.';
     }
 
     case 'speed': {
@@ -345,7 +515,12 @@ export async function handle({ command, argument }, message) {
   }
 
   // join / song / play need the person asking to be in a voice channel.
-  if (!voiceChannel) return 'get into a voice channel first, obviously.';
+  if (!voiceChannel) {
+    return pick([
+      'get into a voice channel first, obviously.',
+      'i cannot play to an empty room. get in a voice channel.',
+    ]);
+  }
 
   const permissions = voiceChannel.permissionsFor(message.client.user);
   if (!permissions?.has('Connect') || !permissions?.has('Speak')) {
@@ -372,8 +547,11 @@ export async function handle({ command, argument }, message) {
 
   const { position } = player.enqueue(guildId, tracks[0]);
   // Position 0 started immediately, and the playing event announces that.
-  return position === 0 ? null : `**${label}** is number ${position} in the queue. wait your turn.`;
+  if (position === 0) return null;
+  return `**${label}** — number ${position}. ${pick(['wait your turn.', 'it will come round.', 'patience, friend. :)'])}`;
 }
+
+const rate = (track) => (track?.speed ? ` at ${track.speed}x` : '');
 
 /** Playback events talk back to the channel the command came from. */
 function events(message) {
@@ -381,7 +559,11 @@ function events(message) {
     if (event.type === 'playing') {
       message.channel
         .send(
-          `now playing **${event.track.title}**, because ${event.track.requestedBy} insisted. :|`,
+          pick([
+            `now playing **${event.track.title}**${rate(event.track)}, because ${event.track.requestedBy} insisted. :|`,
+            `**${event.track.title}**${rate(event.track)}. ${event.track.requestedBy} chose this. remember that. :|`,
+            `on now: **${event.track.title}**${rate(event.track)}. i am listening too. always. :D`,
+          ]),
         )
         .catch(() => {});
     }
