@@ -9,6 +9,7 @@ import {
   spotifyTrack,
   streamDirect,
   streamViaYtdlp,
+  ytdlpDirectUrl,
   ytdlpEnabled,
   ytdlpList,
 } from './resolve.js';
@@ -76,12 +77,32 @@ async function titleOf(url) {
   }
 }
 
-const searchTrack = (title, search, requestedBy) => ({
-  title,
-  requestedBy,
-  seekable: false, // piped from the resolver, so a speed change restarts it
-  open: (options) => streamViaYtdlp(search, { search: true, ...options }),
-});
+/**
+ * A track the resolver has to look up. It can prepare itself ahead of time:
+ * once the direct URL is known, playback skips the lookup entirely and the
+ * track becomes seekable, so a speed change no longer restarts it.
+ */
+function resolvedTrack({ title, requestedBy, target, search = false }) {
+  const track = {
+    title,
+    requestedBy,
+    seekable: false,
+    direct: null,
+    async prepare() {
+      if (track.direct) return;
+      track.direct = await ytdlpDirectUrl(target, { search });
+      track.seekable = true;
+    },
+    open: (options) =>
+      track.direct
+        ? streamDirect(track.direct, options)
+        : streamViaYtdlp(target, { search, ...options }),
+  };
+  return track;
+}
+
+const searchTrack = (title, search, requestedBy) =>
+  resolvedTrack({ title, requestedBy, target: search, search: true });
 
 /**
  * Everything the input asked for: one track, or all of a playlist.
@@ -139,12 +160,9 @@ export async function tracksFor(input, requestedBy) {
         const items = await ytdlpList(target.url);
         if (items.length > 1) {
           return {
-            tracks: items.map((item) => ({
-              title: item.title,
-              requestedBy,
-              seekable: false,
-              open: (options) => streamViaYtdlp(item.url, options),
-            })),
+            tracks: items.map((item) =>
+              resolvedTrack({ title: item.title, requestedBy, target: item.url }),
+            ),
             label: `${items.length} tracks from that playlist`,
           };
         }
@@ -152,14 +170,7 @@ export async function tracksFor(input, requestedBy) {
 
       const title = await titleOf(target.url);
       return {
-        tracks: [
-          {
-            title,
-            requestedBy,
-            seekable: false,
-            open: (options) => streamViaYtdlp(target.url, options),
-          },
-        ],
+        tracks: [resolvedTrack({ title, requestedBy, target: target.url })],
         label: title,
       };
     }

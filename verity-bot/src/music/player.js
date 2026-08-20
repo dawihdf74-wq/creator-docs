@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import {
   AudioPlayerStatus,
   NoSubscriberBehavior,
@@ -22,6 +23,23 @@ import {
  */
 const sessions = new Map();
 
+/**
+ * What listeners actually receive is capped by the voice channel's own
+ * bitrate — 64 kbps by default, more on a boosted server — so encoding above
+ * it just burns CPU, and encoding below it throws away quality for nothing.
+ * 'auto' follows the channel; a number (or "128k") overrides it.
+ */
+export function resolveBitrate(voiceChannel) {
+  const setting = String(config.bitrate ?? 'auto').toLowerCase();
+  const wanted =
+    setting === 'auto'
+      ? (voiceChannel?.bitrate ?? 64_000)
+      : Number(setting.replace(/k$/, '')) * (setting.endsWith('k') ? 1000 : 1);
+
+  if (!Number.isFinite(wanted)) return 64_000;
+  return Math.min(510_000, Math.max(8_000, Math.round(wanted)));
+}
+
 /** Leave on his own after this long doing nothing, rather than idling forever. */
 const IDLE_MS = 5 * 60 * 1000;
 
@@ -40,6 +58,7 @@ function session(guildId) {
     seekBase: 0,
     speed: 1,
     volume: 1,
+    bitrate: 64_000,
     loop: 'off', // off | track | queue
     restarting: false,
     idleTimer: null,
@@ -75,7 +94,12 @@ function session(guildId) {
 }
 
 function start(state, track, seek = 0) {
-  const { stream, kill } = track.open({ speed: state.speed, volume: state.volume, seek });
+  const { stream, kill } = track.open({
+    speed: state.speed,
+    volume: state.volume,
+    bitrate: state.bitrate,
+    seek,
+  });
   const resource = createAudioResource(stream, { inputType: StreamType.OggOpus });
   state.current = { track, kill };
   state.resource = resource;
@@ -97,10 +121,26 @@ function advance(state) {
   try {
     start(state, next);
     state.onEvent({ type: 'playing', track: next });
+    prefetch(state);
   } catch (error) {
     state.onEvent({ type: 'error', message: error.message, track: next });
     advance(state);
   }
+}
+
+/**
+ * Resolves the next track while this one plays, so its several seconds of
+ * page-fetching are spent during music rather than during silence.
+ */
+function prefetch(state) {
+  const next = state.queue[0];
+  if (!next?.prepare || next.prepared) return;
+  next.prepared = true;
+  Promise.resolve(next.prepare()).catch((error) => {
+    // A failed prefetch is not a failed track: it just plays the slow way.
+    next.prepared = false;
+    console.error('[verity] could not prepare the next track:', error.message);
+  });
 }
 
 /** How far into the source we are, in seconds, allowing for playback speed. */
@@ -139,6 +179,7 @@ export async function join(voiceChannel, onEvent) {
 
   await entersState(state.connection, VoiceConnectionStatus.Ready, 20_000);
   state.connection.subscribe(state.player);
+  state.bitrate = resolveBitrate(voiceChannel);
   return state;
 }
 
@@ -276,6 +317,7 @@ export const isConnected = (guildId) => Boolean(sessions.get(guildId)?.connectio
 export const settings = (guildId) => {
   const state = sessions.get(guildId);
   return {
+    bitrate: state?.bitrate ?? 64_000,
     speed: state?.speed ?? 1,
     volume: state?.volume ?? 1,
     loop: state?.loop ?? 'off',

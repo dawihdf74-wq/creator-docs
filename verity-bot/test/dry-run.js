@@ -28,6 +28,7 @@ import { createConsole } from '../src/console.js';
 import { parse as parseMusic, trackFor, isDj } from '../src/music/commands.js';
 import { classify, tempoFilter, parseEmbedTracks } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
+import { resolveBitrate } from '../src/music/player.js';
 import { execFileSync } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { config } from '../src/config.js';
@@ -1000,6 +1001,86 @@ await check('leave tears the session down', () => {
   assert.equal(musicPlayer.leave('guild-music'), true);
   assert.equal(musicPlayer.__sessions.has('guild-music'), false);
   assert.equal(musicPlayer.leave('guild-music'), false, 'and says so if he was never there');
+});
+
+console.log('\nmusic: quality and loading');
+await check('bitrate follows the voice channel by default', () => {
+  assert.equal(config.bitrate, 'auto', 'shipped default');
+  assert.equal(resolveBitrate({ bitrate: 64_000 }), 64_000, 'an ordinary channel');
+  assert.equal(resolveBitrate({ bitrate: 384_000 }), 384_000, 'a level 3 boosted server');
+  assert.equal(resolveBitrate(undefined), 64_000, 'and something sane when unknown');
+});
+await check('an explicit bitrate overrides it, within what opus allows', () => {
+  const original = config.bitrate;
+  config.bitrate = '128k';
+  assert.equal(resolveBitrate({ bitrate: 64_000 }), 128_000, 'k suffix understood');
+  config.bitrate = '256000';
+  assert.equal(resolveBitrate({ bitrate: 64_000 }), 256_000);
+  config.bitrate = '9999999';
+  assert.equal(resolveBitrate({ bitrate: 64_000 }), 510_000, 'clamped to opus max');
+  config.bitrate = 'nonsense';
+  assert.equal(resolveBitrate({ bitrate: 64_000 }), 64_000, 'garbage falls back');
+  config.bitrate = original;
+});
+await check('the encoder is handed the session bitrate', () => {
+  musicPlayer.__sessions.delete('guild-rate');
+  const seen = [];
+  musicPlayer.enqueue('guild-rate', {
+    title: 'loud one',
+    requestedBy: 'dave',
+    seekable: true,
+    open: (options) => {
+      seen.push(options);
+      return { stream: Readable.from([tone]), kill: () => {} };
+    },
+  });
+  assert.equal(typeof seen[0].bitrate, 'number', 'open() receives a bitrate to encode at');
+  musicPlayer.leave('guild-rate');
+});
+await check('the next track is resolved while this one plays', async () => {
+  musicPlayer.__sessions.delete('guild-prefetch');
+  let prepared = 0;
+  const lazy = {
+    title: 'second',
+    requestedBy: 'dave',
+    seekable: false,
+    prepare: async () => {
+      prepared += 1;
+    },
+    open: () => ({ stream: Readable.from([tone]), kill: () => {} }),
+  };
+
+  musicPlayer.enqueue('guild-prefetch', fakeTrack('first'));
+  musicPlayer.enqueue('guild-prefetch', lazy);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(prepared, 0, 'nothing to prefetch until something is playing ahead of it');
+
+  // Starting the first track is what triggers the lookup for the second.
+  musicPlayer.__sessions.get('guild-prefetch').player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  musicPlayer.leave('guild-prefetch');
+});
+await check('a failed prefetch does not lose the track', async () => {
+  musicPlayer.__sessions.delete('guild-prefetch-fail');
+  const broken = {
+    title: 'awkward',
+    requestedBy: 'dave',
+    seekable: false,
+    prepare: async () => {
+      throw new Error('lookup failed');
+    },
+    open: () => ({ stream: Readable.from([tone]), kill: () => {} }),
+  };
+  musicPlayer.enqueue('guild-prefetch-fail', fakeTrack('first'));
+  musicPlayer.enqueue('guild-prefetch-fail', broken);
+  musicPlayer.__sessions.get('guild-prefetch-fail').player.stop(true);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(
+    musicPlayer.nowPlaying('guild-prefetch-fail')?.title,
+    'awkward',
+    'it still plays, just the slow way',
+  );
+  musicPlayer.leave('guild-prefetch-fail');
 });
 
 console.log('\nstore');

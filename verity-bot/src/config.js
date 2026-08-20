@@ -81,6 +81,9 @@ export const config = {
     id: process.env.VERITY_SPOTIFY_ID || null,
     secret: process.env.VERITY_SPOTIFY_SECRET || null,
   },
+  // Opus bitrate for music. 'auto' follows the voice channel's own setting,
+  // which is what actually limits what listeners receive.
+  bitrate: process.env.VERITY_BITRATE || 'auto',
   // Where audio actually comes from for links that are not already audio.
   // Unset means direct files, radio streams and local files only.
   ytdlp:

@@ -243,6 +243,29 @@ So a Spotify link needs two things: something to read the title (built in — be
 free API credentials in `VERITY_SPOTIFY_ID` / `VERITY_SPOTIFY_SECRET`) and something to
 fetch audio.
 
+### Sound quality and loading time
+
+Two ceilings are outside the bot's control, and worth knowing before tuning anything:
+Discord carries **lossy Opus** and nothing else, and what listeners actually receive is
+capped by the **voice channel's bitrate** — 64 kbps by default, 128/256/384 kbps as the
+server gains boost levels. Bit-perfect audio is not on the menu for any Discord bot.
+
+Within that, he now takes everything available:
+
+- **Bitrate follows the channel.** He encodes at whatever your voice channel allows
+  instead of a fixed 96 kbps. Raise the channel's bitrate in **Server Settings → the
+  channel → Bitrate** and he follows it up. Pin it with `VERITY_BITRATE=128k` if you'd
+  rather decide yourself.
+- **The next track is resolved while the current one plays.** Looking a link up is the
+  slow part of starting a song — several seconds of fetching before any audio moves — so
+  it happens during music instead of during silence. A track prepared this way also
+  becomes seekable, so `verityspeed` resumes it in place rather than restarting it.
+
+Things that sound like they'd help and don't: `-application audio`, `-vbr on` and
+`frame_duration 20` are already ffmpeg's defaults for libopus, and cutting the probe size
+measured no difference at all here. The gap you can hear is the channel bitrate; the gap
+you can feel is the lookup.
+
 ### Setting it up on Windows
 
 Settings live in the **`.env` file**, not in the terminal. Typing `VERITY_YTDLP=true` at a

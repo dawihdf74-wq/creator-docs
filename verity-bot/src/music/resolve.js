@@ -266,7 +266,7 @@ export async function ytdlpList(url) {
 }
 
 /** ffmpeg turns anything it can open into the Ogg Opus that Discord wants. */
-function encode(args, stdin) {
+function encode(args, stdin, bitrate = 96_000) {
   const ffmpeg = spawn(
     ffmpegPath,
     [
@@ -283,7 +283,7 @@ function encode(args, stdin) {
       '-ac',
       '2',
       '-b:a',
-      '96k',
+      String(Math.round(bitrate)),
       'pipe:1',
     ],
     { stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] },
@@ -301,18 +301,23 @@ function encode(args, stdin) {
 
 /** Streams a URL or path straight through ffmpeg. */
 export function streamDirect(target, options = {}) {
+  const bitrate = options.bitrate ?? 96_000;
   const network = /^https?:\/\//i.test(target);
   const seek = Number(options.seek) || 0;
-  const ffmpeg = encode([
-    ...(network
-      ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']
-      : []),
-    // Before -i, so ffmpeg jumps rather than decoding everything it skips.
-    ...(seek > 0 ? ['-ss', String(seek)] : []),
-    '-i',
-    target,
-    ...filters(options),
-  ]);
+  const ffmpeg = encode(
+    [
+      ...(network
+        ? ['-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5']
+        : []),
+      // Before -i, so ffmpeg jumps rather than decoding everything it skips.
+      ...(seek > 0 ? ['-ss', String(seek)] : []),
+      '-i',
+      target,
+      ...filters(options),
+    ],
+    null,
+    bitrate,
+  );
   return { stream: ffmpeg.stdout, kill: () => ffmpeg.kill('SIGKILL') };
 }
 
@@ -345,7 +350,11 @@ export function streamViaYtdlp(target, { search = false, ...options } = {}) {
   });
 
   // A pipe cannot be seeked cheaply, so a speed change restarts these.
-  const ffmpeg = encode(['-i', 'pipe:0', ...filters(options)], ytdlp.stdout);
+  const ffmpeg = encode(
+    ['-i', 'pipe:0', ...filters(options)],
+    ytdlp.stdout,
+    options.bitrate ?? 96_000,
+  );
   return {
     stream: ffmpeg.stdout,
     kill: () => {
@@ -353,6 +362,38 @@ export function streamViaYtdlp(target, { search = false, ...options } = {}) {
       ffmpeg.kill('SIGKILL');
     },
   };
+}
+
+/**
+ * Asks yt-dlp only for the direct media URL, without downloading anything.
+ *
+ * Resolving a page is the slow part of starting a track — several seconds of
+ * fetching and parsing before a single byte of audio moves. Doing it for the
+ * *next* track while the current one plays takes that wait off the front of
+ * every song, and the resulting URL is seekable, which a pipe never was.
+ */
+export async function ytdlpDirectUrl(target, { search = false } = {}) {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+
+  const { stdout } = await run(
+    config.ytdlp,
+    [
+      search ? `ytsearch1:${target}` : target,
+      '-f',
+      'bestaudio/best',
+      '--no-playlist',
+      '--get-url',
+      '--quiet',
+      '--no-warnings',
+    ],
+    { timeout: 45_000, maxBuffer: 4 * 1024 * 1024 },
+  );
+
+  const url = stdout.split('\n').find((line) => line.startsWith('http'));
+  if (!url) throw new Error('yt-dlp gave no url');
+  return url.trim();
 }
 
 export const ytdlpEnabled = () => Boolean(config.ytdlp);
