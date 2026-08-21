@@ -81,6 +81,7 @@ function session(guildId) {
     volume: 1,
     bitrate: 64_000,
     loop: 'off', // off | track | queue
+    random: false,
     restarting: false,
     skipping: false,
     lastPlayed: null,
@@ -161,7 +162,13 @@ function start(state, track, seek = 0) {
 function advance(state) {
   clearTimeout(state.idleTimer);
 
-  const next = state.queue.shift();
+  // Random mode takes one from anywhere in the queue rather than the front,
+  // so a playlist plays through in a different order every time without
+  // rewriting the list itself.
+  const next =
+    state.random && state.queue.length > 1
+      ? state.queue.splice(Math.floor(Math.random() * state.queue.length), 1)[0]
+      : state.queue.shift();
   if (!next) {
     state.onEvent({ type: 'empty', last: state.lastPlayed, history: state.history });
     state.idleTimer = setTimeout(() => {
@@ -398,6 +405,12 @@ function restart(state) {
   return { restarted: true, resumedAt: at, fromStart: !track.seekable };
 }
 
+export function setRandom(guildId, on) {
+  const state = session(guildId);
+  state.random = Boolean(on);
+  return state.random;
+}
+
 export function setLoop(guildId, mode) {
   const state = session(guildId);
   state.loop = mode;
@@ -507,6 +520,7 @@ export const settings = (guildId) => {
     speed: state?.speed ?? 1,
     volume: state?.volume ?? 1,
     loop: state?.loop ?? 'off',
+    random: state?.random ?? false,
     paused: state?.player.state.status === AudioPlayerStatus.Paused,
     position: state ? elapsed(state) : 0,
   };

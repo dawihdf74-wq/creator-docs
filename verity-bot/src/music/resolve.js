@@ -301,28 +301,29 @@ export async function ytdlpList(url) {
 }
 
 /** ffmpeg turns anything it can open into the Ogg Opus that Discord wants. */
-function encode(args, stdin, bitrate = 96_000) {
-  const ffmpeg = spawn(
-    ffmpegPath,
-    [
-      '-loglevel',
-      'error',
-      ...args,
-      '-vn',
-      '-acodec',
-      'libopus',
-      '-f',
-      'opus',
-      '-ar',
-      '48000',
-      '-ac',
-      '2',
-      '-b:a',
-      String(Math.round(bitrate)),
-      'pipe:1',
-    ],
-    { stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'] },
-  );
+function encode(args, stdin, { bitrate = 96_000, copy = false } = {}) {
+  // Copying sends the source's own Opus to Discord untouched: no second lossy
+  // pass, and none of the CPU or the ~120ms an encode costs before the first
+  // byte moves. Only safe when the source is already 48kHz stereo Opus and
+  // nothing needs filtering.
+  const output = copy
+    ? ['-c:a', 'copy', '-f', 'opus']
+    : [
+        '-acodec',
+        'libopus',
+        '-f',
+        'opus',
+        '-ar',
+        '48000',
+        '-ac',
+        '2',
+        '-b:a',
+        String(Math.round(bitrate)),
+      ];
+
+  const ffmpeg = spawn(ffmpegPath, ['-loglevel', 'error', ...args, '-vn', ...output, 'pipe:1'], {
+    stdio: [stdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+  });
 
   let errors = '';
   ffmpeg.stderr.on('data', (chunk) => (errors += chunk.toString().slice(0, 500)));
@@ -339,6 +340,9 @@ export function streamDirect(target, options = {}) {
   const bitrate = options.bitrate ?? 96_000;
   const network = /^https?:\/\//i.test(target);
   const seek = Number(options.seek) || 0;
+  // Any filter means the audio has to be decoded, so passthrough is off.
+  const untouched =
+    Boolean(options.copy) && (options.speed ?? 1) === 1 && (options.volume ?? 1) === 1;
   const ffmpeg = encode(
     [
       ...(network
@@ -348,10 +352,10 @@ export function streamDirect(target, options = {}) {
       ...(seek > 0 ? ['-ss', String(seek)] : []),
       '-i',
       target,
-      ...filters(options),
+      ...(untouched ? [] : filters(options)),
     ],
     null,
-    bitrate,
+    { bitrate, copy: untouched },
   );
   return { stream: ffmpeg.stdout, kill: () => ffmpeg.kill('SIGKILL') };
 }
@@ -385,11 +389,9 @@ export function streamViaYtdlp(target, { search = false, ...options } = {}) {
   });
 
   // A pipe cannot be seeked cheaply, so a speed change restarts these.
-  const ffmpeg = encode(
-    ['-i', 'pipe:0', ...filters(options)],
-    ytdlp.stdout,
-    options.bitrate ?? 96_000,
-  );
+  const ffmpeg = encode(['-i', 'pipe:0', ...filters(options)], ytdlp.stdout, {
+    bitrate: options.bitrate ?? 96_000,
+  });
   return {
     stream: ffmpeg.stdout,
     kill: () => {
@@ -416,19 +418,35 @@ export async function ytdlpDirectUrl(target, { search = false } = {}) {
     config.ytdlp,
     [
       search ? `ytsearch1:${target}` : target,
+      // Prefer the format Discord can take as-is, falling back when a track
+      // has no such thing.
       '-f',
-      'bestaudio/best',
+      'bestaudio[acodec=opus][asr=48000]/bestaudio/best',
       '--no-playlist',
-      '--get-url',
+      // The url and what it is, in one call, so passthrough can be decided
+      // without a second round trip.
+      '--print',
+      '%(acodec)s\t%(asr)s\t%(audio_channels)s\t%(url)s',
       '--quiet',
       '--no-warnings',
     ],
     { timeout: 45_000, maxBuffer: 4 * 1024 * 1024 },
   );
 
-  const url = stdout.split('\n').find((line) => line.startsWith('http'));
-  if (!url) throw new Error('yt-dlp gave no url');
-  return url.trim();
+  const row = stdout
+    .split('\n')
+    .map((line) => line.split('\t'))
+    .find((parts) => parts.at(-1)?.trim().startsWith('http'));
+
+  if (!row) throw new Error('yt-dlp gave no url');
+
+  const [acodec, asr, channels, url] = row.map((value) => value.trim());
+  return {
+    url,
+    acodec,
+    // Anything else has to be decoded and re-encoded on the way to Discord.
+    copyable: /opus/i.test(acodec) && Number(asr) === 48_000 && Number(channels) === 2,
+  };
 }
 
 /**

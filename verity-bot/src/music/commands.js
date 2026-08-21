@@ -39,10 +39,13 @@ const ALIASES = {
   playlistsee: 'view',
   see: 'view',
   playlist: 'playlist',
-  list: 'playlist',
   pl: 'playlist',
-  queue: 'playlist',
-  q: 'playlist',
+  queue: 'queue',
+  list: 'queue',
+  q: 'queue',
+  random: 'random',
+  rand: 'random',
+  rnd: 'random',
   // keeping lists
   saveplaylist: 'save',
   save: 'save',
@@ -182,12 +185,15 @@ function resolvedTrack({ title, requestedBy, target, search = false }) {
     meta: { kind: 'resolved', target, search },
     async prepare() {
       if (track.direct) return;
-      track.direct = await ytdlpDirectUrl(target, { search });
+      const found = await ytdlpDirectUrl(target, { search });
+      track.direct = found.url;
+      // Already the right kind of Opus: it can go out without being touched.
+      track.copyable = found.copyable;
       track.seekable = true;
     },
     open: (options) =>
       track.direct
-        ? streamDirect(track.direct, options)
+        ? streamDirect(track.direct, { ...options, copy: track.copyable })
         : streamViaYtdlp(target, { search, ...options }),
   };
   return track;
@@ -303,6 +309,18 @@ export function rebuildTrack(entry, requestedBy) {
   return track;
 }
 
+/** Puts a kept playlist back into the queue. */
+async function putOn(saved, message, voiceChannel) {
+  if (!voiceChannel) return 'get into a voice channel and i will put it on.';
+
+  const rebuilt = saved.entries.map((entry) =>
+    rebuildTrack(entry, message.member?.displayName ?? message.author.username),
+  );
+  await player.join(voiceChannel, events(message));
+  const { added, startedPlaying } = player.enqueueAll(message.guildId, rebuilt);
+  return { embeds: [embeds.queuedMany(saved.name, added, startedPlaying)] };
+}
+
 /** Kept for the console, which only ever wants one thing at a time. */
 export async function trackFor(input, requestedBy) {
   const { tracks } = await tracksFor(input, requestedBy);
@@ -311,14 +329,15 @@ export async function trackFor(input, requestedBy) {
 
 const HELP = [
   '**veritysong** <link or search> — put something on. Short: `verityp`',
-  '**veritypls** — the list, with a button on each track to play it next. Also `verityplaylistsee`',
-  '**verityplaylist** — the same list as plain text. `verityplaylist 2` for the next page. Short: `verityq`',
+  '**veritypls** — what is queued, with a dropdown to pick what plays next. `verityqueue` for plain text',
+  '**verityplaylist** — put a kept playlist on. `verityplaylist 2` for the second one, `verityplaylist saved` to see them',
   '**veritynext** <n> [speed] — that one goes next, at that speed if you name one. Short: `verityn`',
   '**verityjump** <n> — straight there, binning everything between. Short: `verityj`',
   '**veritysaveplaylist** <link or name> — keep a playlist. `verityplaylist <name>` puts it back. Short: `veritysp`',
   '**verityskip** `veritys` · **veritystop** · **veritypause** `veritypa` · **verityresume** `verityre`',
   '**verityshuffle** `veritysh` · **verityclear** `verityc` · **verityremove** <n> `verityr`',
   '**verityloop** off | track | queue — once each, one forever, or round and round. Short: `verityl`',
+  '**verityrandom** — play the queue in no particular order. Short: `verityrnd`',
   '**verityspeed** 2 `veritysd` · **verityvolume** 50 `verityv`',
   '**verityautoplay** on — when the queue runs out he finds something himself. Short: `verityap`',
   '**veritytrigger** add <phrase> = <link> — say the phrase, the song goes on',
@@ -403,22 +422,48 @@ export async function handle({ command, argument }, message) {
       return { embeds, components };
     }
 
+    case 'queue':
+      return renderPlaylist(guildId, Number(argument) || 1);
+
+    case 'random': {
+      const wanted = argument.trim().toLowerCase();
+      const current = player.settings(guildId).random;
+      const on = wanted ? ['on', 'true', 'yes'].includes(wanted) : !current;
+      player.setRandom(guildId, on);
+      return on
+        ? 'random it is. i will pick. you will not know what is coming. neither will i. :D'
+        : 'back in order. one after another, like a good little list.';
+    }
+
     case 'playlist': {
       const wanted = argument.trim();
+      const kept = store.listPlaylists(guildId);
 
-      if (!wanted || /^\d+$/.test(wanted)) return renderPlaylist(guildId, Number(wanted) || 1);
+      // Nothing, or a number, means one of the playlists you kept: playing
+      // one is what you nearly always want, and looking at the queue has its
+      // own command.
+      if (!wanted || /^\d+$/.test(wanted)) {
+        if (!kept.length) {
+          return 'you have not kept any playlists. `veritysaveplaylist <link>` and i will hold onto it.';
+        }
+        const chosen = kept[(Number(wanted) || 1) - 1];
+        if (!chosen) {
+          return `you have ${kept.length} kept. \`verityplaylist saved\` shows them.`;
+        }
+        return putOn(chosen, message, voiceChannel);
+      }
 
       if (['saved', 'all', 'names'].includes(wanted.toLowerCase())) {
-        const saved = store.listPlaylists(guildId);
-        if (!saved.length) {
-          return 'nothing saved yet. `veritysaveplaylist <name>` keeps one for later.';
+        if (!kept.length) {
+          return 'nothing kept yet. `veritysaveplaylist <link>` keeps one for later.';
         }
         return [
           '**kept for later**',
-          ...saved.map(
-            (entry) => `\`${entry.name}\` — ${entry.entries.length} tracks, by ${entry.by}`,
+          ...kept.map(
+            (entry, index) =>
+              `\`${index + 1}\` **${entry.name}** — ${entry.entries.length} tracks, by ${entry.by}`,
           ),
-          '`verityplaylist <name>` puts one back.',
+          '`verityplaylist 2` puts the second one on.',
         ].join('\n');
       }
 
@@ -426,19 +471,11 @@ export async function handle({ command, argument }, message) {
         return '`veritysong <link>` to play it now, or `veritysaveplaylist <link>` to keep it for later.';
       }
 
-      // A name: put that saved playlist back into the queue.
-      const saved = store.getPlaylist(guildId, wanted);
-      if (!saved) {
+      const byName = store.getPlaylist(guildId, wanted);
+      if (!byName) {
         return `i have nothing called "${wanted}". \`verityplaylist saved\` shows what i do have.`;
       }
-      if (!voiceChannel) return 'get into a voice channel and i will put it back on.';
-
-      const rebuilt = saved.entries.map((entry) =>
-        rebuildTrack(entry, message.member?.displayName ?? message.author.username),
-      );
-      await player.join(voiceChannel, events(message));
-      const { added, startedPlaying } = player.enqueueAll(guildId, rebuilt);
-      return { embeds: [embeds.queuedMany(saved.name, added, startedPlaying)] };
+      return putOn(byName, message, voiceChannel);
     }
 
     case 'save': {

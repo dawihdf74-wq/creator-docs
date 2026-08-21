@@ -38,6 +38,7 @@ import {
   tempoFilter,
   parseEmbedTracks,
   parseEmbedPlaylist,
+  streamDirect as resolveDirect,
 } from '../src/music/resolve.js';
 import * as musicPlayer from '../src/music/player.js';
 import { buildPlaylistView, parseId, PAGE_SIZE } from '../src/music/view.js';
@@ -776,6 +777,8 @@ await check('every command resolves to one canonical name', () => {
     veritypls: 'view',
     verityplaylistsee: 'view',
     verityplaylist: 'playlist',
+    verityqueue: 'queue',
+    verityrandom: 'random',
     'veritysaveplaylist friday': 'save',
     'veritydeleteplaylist friday': 'delete',
     'veritynext 3': 'next',
@@ -804,7 +807,7 @@ await check('the short forms mean the same thing', () => {
     veritys: 'skip',
     'verityn 3': 'next',
     'verityj 3': 'jump',
-    verityq: 'playlist',
+    verityq: 'queue',
     'veritysp friday': 'save',
     'veritydp friday': 'delete',
     veritysh: 'shuffle',
@@ -1422,6 +1425,92 @@ await check('a rejoin that fails too means he really was removed', async () => {
   );
   assert.equal(outcome, 'gave up');
   assert.match(gaveUp, /removed/);
+});
+
+console.log('\nmusic: playing kept playlists, and out of order');
+await check('the queue and the kept playlists are different commands now', () => {
+  assert.equal(parseMusic('verityplaylist').command, 'playlist', 'plays what you kept');
+  assert.equal(parseMusic('verityplaylist 2').command, 'playlist', 'the second one');
+  assert.equal(parseMusic('verityqueue').command, 'queue', 'shows what is lined up');
+  assert.equal(parseMusic('verityrnd').command, 'random');
+});
+await check('random mode takes from anywhere in the queue', async () => {
+  musicPlayer.__sessions.delete('guild-random');
+  for (let i = 1; i <= 20; i += 1) musicPlayer.enqueue('guild-random', fakeTrack(`track ${i}`));
+  musicPlayer.setRandom('guild-random', true);
+
+  const played = [];
+  for (let i = 0; i < 6; i += 1) {
+    await finishTrack('guild-random');
+    played.push(musicPlayer.nowPlaying('guild-random')?.title);
+  }
+
+  const inOrder = ['track 2', 'track 3', 'track 4', 'track 5', 'track 6', 'track 7'];
+  assert.notDeepEqual(played, inOrder, 'not simply the next one each time');
+  assert.equal(new Set(played).size, played.length, 'and never the same track twice');
+  musicPlayer.leave('guild-random');
+});
+await check('order is restored when random is turned off', async () => {
+  musicPlayer.__sessions.delete('guild-order-again');
+  for (let i = 1; i <= 5; i += 1) musicPlayer.enqueue('guild-order-again', fakeTrack(`track ${i}`));
+  musicPlayer.setRandom('guild-order-again', true);
+  musicPlayer.setRandom('guild-order-again', false);
+
+  await finishTrack('guild-order-again');
+  assert.equal(musicPlayer.nowPlaying('guild-order-again')?.title, 'track 2', 'back to the front');
+  assert.equal(musicPlayer.settings('guild-order-again').random, false);
+  musicPlayer.leave('guild-order-again');
+});
+
+console.log('\nmusic: sending audio without touching it');
+await check('an Opus source is passed through, not re-encoded', async () => {
+  const source = '/tmp/verity-passthrough.webm';
+  execFileSync(ffmpegPath, [
+    '-f',
+    'lavfi',
+    '-i',
+    'sine=frequency=440:duration=2',
+    '-acodec',
+    'libopus',
+    '-ar',
+    '48000',
+    '-ac',
+    '2',
+    '-b:a',
+    '160k',
+    '-f',
+    'webm',
+    '-loglevel',
+    'error',
+    source,
+    '-y',
+  ]);
+
+  const drain = async (options) => {
+    const { stream, kill } = resolveDirect(source, options);
+    const bytes = await new Promise((resolve) => {
+      let total = 0;
+      stream.on('data', (chunk) => (total += chunk.length));
+      stream.on('end', () => resolve(total));
+      setTimeout(() => resolve(total), 5000);
+    });
+    kill();
+    return bytes;
+  };
+
+  const copied = await drain({ copy: true });
+  const encoded = await drain({ copy: false, bitrate: 96_000 });
+  assert.ok(copied > 0 && encoded > 0, 'both produce audio');
+  assert.ok(
+    copied > encoded,
+    `passthrough keeps the source bitrate (${copied} bytes) rather than squashing it (${encoded})`,
+  );
+
+  // A filter forces a decode, so passthrough has to stand down.
+  const stretched = await drain({ copy: true, speed: 2 });
+  assert.ok(stretched < copied, 'a speed change is re-encoded, not copied');
+
+  fs.rmSync(source, { force: true });
 });
 
 console.log('\nmusic: the clickable panel');

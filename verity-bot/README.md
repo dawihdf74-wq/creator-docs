@@ -185,8 +185,10 @@ veritysong http://ice1.somafm.com:80/groovesalad-128-mp3
 | `verityskip` · `veritystop` | Skip one · stop and clear the queue |
 | `veritypause` · `verityresume` | Hold it · carry on |
 | `verityqueue` · `veritynp` | What's waiting · what's on, and how far in |
-| `veritypls` | **The list with a button on each track** — click one and it plays next. Also `verityplaylistsee` |
-| `verityplaylist` | The same list as plain text. `verityplaylist 2` for the next page |
+| `veritypls` | **The queue with a dropdown** — pick a song and it plays next. Also `verityplaylistsee` |
+| `verityqueue` | The queue as plain text. `verityqueue 2` for the next page. Short: `verityq` |
+| `verityplaylist` | **Puts a kept playlist on.** `verityplaylist 2` for the second one, `verityplaylist saved` to list them |
+| `verityrandom` | Play the queue in no particular order. Short: `verityrnd` |
 | `veritynext <n> [speed]` | That one plays next — at that speed, if you name one |
 | `verityjump <n>` | Go straight to it, binning everything in between |
 | `veritysaveplaylist <link>` | Keep a playlist for later, under its own name |
@@ -222,7 +224,13 @@ says so instead of grabbing whatever landed in its place.
 | `veritysh` shuffle | `verityc` clear | `verityr` remove | `veritysd` speed |
 | `verityv` volume | `veritypa` pause | `verityre` resume | `verityd` leave |
 
-**Picking what plays next.** `verityplaylist` numbers everything waiting, and those
+**Playing a kept playlist.** `verityplaylist` puts your first kept playlist on, and
+`verityplaylist 2`, `3`, `4` the ones after it — `verityplaylist saved` shows the numbers.
+By name works too. Turn on `verityrandom` and the queue plays in no particular order,
+taking from anywhere in the list rather than reshuffling it, so the order is different
+every time through.
+
+**Picking what plays next.** `verityqueue` numbers everything waiting, and those
 numbers are what the other commands take:
 
 ```
@@ -341,6 +349,12 @@ server gains boost levels. Bit-perfect audio is not on the menu for any Discord 
 
 Within that, he now takes everything available:
 
+- **Audio he doesn't touch at all.** When a track is already 48kHz stereo Opus — which most
+  of YouTube is — it now goes to Discord exactly as it arrived, with no second lossy
+  encode. That's both better sounding and dramatically quicker to start: measured here at
+  **19ms against 122ms**, keeping the source's full bitrate instead of squashing it to
+  96k. Anything else, or anything with a speed or volume change on it, is encoded as
+  before, since a filter means it has to be decoded anyway.
 - **Bitrate follows the channel.** He encodes at whatever your voice channel allows
   instead of a fixed 96 kbps. Raise the channel's bitrate in **Server Settings → the
   channel → Bitrate** and he follows it up. Pin it with `VERITY_BITRATE=128k` if you'd

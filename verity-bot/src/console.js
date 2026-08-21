@@ -42,6 +42,7 @@ const HELP = `
   next 3 [speed] · jump 3      move one up · go straight to it
   shuffle · clear · remove 3   the rest of the queue
   speed 2 · volume 50 · loop    2x speed, half volume, loop track|queue|off
+  random                       play the queue in no particular order
   leave                         get out of the voice channel
 
   faq                          list the canned answers
@@ -124,7 +125,7 @@ export function createConsole(client, out = (line = '') => console.log(line), on
       .replace(/^\//, '')
       // The Discord commands are muscle memory by now; accept them here too.
       .replace(
-        /^verity(?=(song|play|p|playlist|list|pl|next|n|jump|j|skip|s|stop|pause|pa|resume|re|queue|q|np|nowplaying|loop|l|shuffle|sh|clear|c|remove|r|speed|sd|volume|vol|v|join|leave|dc|d)$)/i,
+        /^verity(?=(song|play|p|playlist|list|pl|next|n|jump|j|skip|s|stop|pause|pa|resume|re|queue|q|np|nowplaying|loop|l|random|rnd|shuffle|sh|clear|c|remove|r|speed|sd|volume|vol|v|join|leave|dc|d)$)/i,
         '',
       )
       .toLowerCase();
@@ -241,6 +242,17 @@ export function createConsole(client, out = (line = '') => console.log(line), on
         if (!mode) return out('  loop track | loop queue | loop off');
         musicPlayer.setLoop(musicGuildId(), mode);
         return out(`  loop: ${mode}`);
+      }
+
+      case 'random':
+      case 'rnd': {
+        const on = ['on', 'true', 'yes'].includes((rest[0] ?? '').toLowerCase())
+          ? true
+          : ['off', 'false', 'no'].includes((rest[0] ?? '').toLowerCase())
+            ? false
+            : !musicPlayer.settings(musicGuildId()).random;
+        musicPlayer.setRandom(musicGuildId(), on);
+        return out(`  random: ${on ? 'on' : 'off'}`);
       }
 
       case 'shuffle':
